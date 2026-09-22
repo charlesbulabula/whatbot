@@ -58,7 +58,7 @@ test('full order: catalogue → size → quantity → address → recap → paym
 
   const done = c.image('proof-123');
   assert.match(done.last.body, /Capture reçue/);
-  assert.equal(done.tasks.length, 1); // admin alert
+  assert.equal(done.tasks.length, 2); // admin alert + local copy of the proof
   assert.equal(c.state(), 'DONE');
 
   const order = db.getOrder(db.lastOrder(db.getCustomer(c.phone).id).id);
@@ -322,4 +322,22 @@ test('a late screenshot during a new order is attached without losing the cart',
   assert.match(messages[1].body, /Piment : quelle taille/);
   assert.equal(c.state(), 'PICK_SIZE');
   assert.equal(db.getOrder(orderId).payment_proof, 'proof-mid-flow');
+});
+
+test('"agent" pauses the bot until "menu"; the shop is alerted', () => {
+  const c = customer('243810000020');
+  c.say('Bonjour');
+  c.tap('menu:order');
+  const handoff = c.say('agent');
+  assert.match(handoff.last.body, /Une personne vous répond/);
+  assert.equal(handoff.tasks.length, 1);
+  assert.equal(c.state(), 'HUMAN');
+
+  assert.equal(c.say('Vous livrez à Masina ?').messages.length, 0, 'bot stays silent');
+  assert.equal(c.voice().messages.length, 0, 'voice notes are left for the person');
+  assert.equal(db.handoffConversations().find((h) => h.phone === c.phone).unanswered, 2);
+
+  const back = c.say('menu').last;
+  assert.deepEqual(optionIds(back).slice(0, 1), ['menu:order']);
+  assert.equal(c.state(), 'MENU');
 });

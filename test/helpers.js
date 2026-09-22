@@ -2,6 +2,7 @@ import './setup.js';
 import { handleInbound } from '../src/bot/engine.js';
 import { seedIfEmpty } from '../src/db/seed.js';
 import { db } from '../src/db/index.js';
+import { send as sendToWhatsApp } from '../src/whatsapp/client.js';
 
 seedIfEmpty();
 
@@ -11,6 +12,8 @@ let seq = 0;
 export function customer(phone) {
   const send = (msg) => {
     const { messages, tasks } = handleInbound({ id: `wamid.${++seq}`, from: phone, type: 'text', ...msg });
+    // Same path as production: with WA_ENABLED=false, send() only logs (synchronously).
+    for (const m of messages) sendToWhatsApp(m);
     return { messages, tasks, last: messages.at(-1), all: messages.map(bodyOf).join('\n---\n') };
   };
   return {

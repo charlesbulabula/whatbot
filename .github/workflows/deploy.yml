@@ -1,0 +1,86 @@
+# Tests every push; on the default branch, then deploys to the VPS.
+#
+# Deployment needs repository secrets (Settings > Secrets and variables > Actions):
+#   VPS_PASSWORD     root password of the VPS                          (required to deploy)
+#   ADMIN_PASSWORD   password of the /admin dashboard                   (required)
+#   WA_VERIFY_TOKEN  any word you choose, pasted in Meta's webhook form (required)
+#   WA_PHONE_NUMBER_ID, WA_TOKEN, WA_APP_SECRET, WA_BUSINESS_NUMBER     (from Meta)
+#   MOMO_ORANGE, MOMO_AIRTEL, MOMO_HOLDER, ADMIN_NOTIFY_NUMBER          (shop settings)
+#   ANTHROPIC_API_KEY                                                   (optional: free-text orders)
+#   VPS_HOST (default 72.62.238.174), repository variable DOMAIN (default bot.ll-aca.site)
+#
+# This repository is public, so its Actions logs are public: the deploy
+# script never prints secret values, only which settings are set.
+name: Test & deploy
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      domain:
+        description: Public domain of the bot
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - run: npm test
+
+  deploy:
+    needs: test
+    if: github.event_name != 'pull_request' && github.ref_name == github.event.repository.default_branch
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check deployment secrets
+        id: gate
+        env:
+          VPS_PASSWORD: ${{ secrets.VPS_PASSWORD }}
+        run: |
+          if [ -z "$VPS_PASSWORD" ]; then
+            echo "::notice::Secret VPS_PASSWORD is not set: tests passed, deployment skipped."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.gate.outputs.ready == 'true'
+
+      - name: Install sshpass
+        if: steps.gate.outputs.ready == 'true'
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq sshpass
+
+      - name: Deploy to the VPS
+        if: steps.gate.outputs.ready == 'true'
+        env:
+          VPS: root@${{ secrets.VPS_HOST || '72.62.238.174' }}
+          SSHPASS: ${{ secrets.VPS_PASSWORD }}
+          DOMAIN: ${{ inputs.domain || vars.DOMAIN || 'bot.ll-aca.site' }}
+          # Settings written into /opt/whatbot/.env (empty ones are left untouched).
+          WHATBOT_ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
+          WHATBOT_WA_VERIFY_TOKEN: ${{ secrets.WA_VERIFY_TOKEN }}
+          WHATBOT_WA_PHONE_NUMBER_ID: ${{ secrets.WA_PHONE_NUMBER_ID }}
+          WHATBOT_WA_TOKEN: ${{ secrets.WA_TOKEN }}
+          WHATBOT_WA_APP_SECRET: ${{ secrets.WA_APP_SECRET }}
+          WHATBOT_WA_BUSINESS_NUMBER: ${{ secrets.WA_BUSINESS_NUMBER }}
+          WHATBOT_MOMO_ORANGE: ${{ secrets.MOMO_ORANGE }}
+          WHATBOT_MOMO_AIRTEL: ${{ secrets.MOMO_AIRTEL }}
+          WHATBOT_MOMO_HOLDER: ${{ secrets.MOMO_HOLDER }}
+          WHATBOT_ADMIN_NOTIFY_NUMBER: ${{ secrets.ADMIN_NOTIFY_NUMBER }}
+          WHATBOT_ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: ./deploy/deploy.sh

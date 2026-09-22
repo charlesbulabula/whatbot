@@ -3,11 +3,14 @@ import express from 'express';
 import { config } from '../config.js';
 import { logger } from '../utils/logger.js';
 import * as db from '../db/index.js';
-import { DEFAULT_LOCALE, normalizeLocale } from '../i18n/index.js';
-import { changeOrderStatus, ORDER_STATUSES } from '../bot/orders.js';
-import { downloadMedia } from '../whatsapp/client.js';
+import { DEFAULT_LOCALE, normalizeLocale, t } from '../i18n/index.js';
+import { changeOrderStatus, ORDER_STATUSES, storeProof } from '../bot/orders.js';
+import { downloadMedia, send } from '../whatsapp/client.js';
+import { inServiceWindow } from '../bot/notify.js';
+import { text } from '../bot/messages.js';
 import { adminDictionaries } from './i18n.js';
 import * as views from './views.js';
+import { routeUrl, ordersForRoute, riderCards } from './route.js';
 
 export const adminRouter = express.Router();
 
@@ -111,6 +114,7 @@ adminRouter.get('/', (req, res) => {
       kpis,
       shopping: db.shoppingList(day),
       forecast: db.demandForecast(),
+      handoffs: db.handoffConversations(),
       flash: req.query.flash,
     }),
   );
@@ -144,6 +148,8 @@ adminRouter.get('/orders/:id/proof', async (req, res) => {
   const order = db.getOrder(Number(req.params.id));
   if (!order?.payment_proof) return res.status(404).send('No proof');
   try {
+    const file = order.payment_proof_file || (await storeProof(order));
+    if (file) return res.set('Cache-Control', 'private, max-age=86400').sendFile(file);
     const { contentType, buffer } = await downloadMedia(order.payment_proof);
     res.set('Content-Type', contentType || 'application/octet-stream').set('Cache-Control', 'private, max-age=3600').send(buffer);
   } catch (err) {
@@ -204,6 +210,74 @@ adminRouter.get('/customers/:id', (req, res) => {
       customer,
       orders: db.ordersForCustomer(customer.id),
       messages: db.messagesFor(customer.phone),
+      state: db.getConversation(customer.phone).state,
+      canReply: inServiceWindow(customer),
+      flash: req.query.flash,
     }),
   );
+});
+
+adminRouter.post('/customers/:id/reply', async (req, res) => {
+  const { L } = res.locals;
+  const customer = db.getCustomerById(Number(req.params.id));
+  if (!customer) return res.status(404).send('Not found');
+  const back = `/admin/customers/${customer.id}`;
+  const body = String(req.body.body || '').trim().slice(0, 4000);
+  if (!body) return res.redirect(back);
+  if (!inServiceWindow(customer)) return res.redirect(withFlash(back, L.windowClosed));
+  try {
+    await send(text(customer.phone, body));
+    res.redirect(withFlash(back, L.messageSent));
+  } catch (err) {
+    logger.error('Admin reply failed:', err.message);
+    res.redirect(withFlash(back, `${L.messageFailed}: ${err.message}`));
+  }
+});
+
+adminRouter.post('/customers/:id/takeover', (req, res) => {
+  const customer = db.getCustomerById(Number(req.params.id));
+  if (!customer) return res.status(404).send('Not found');
+  db.setConversationState(customer.phone, 'HUMAN', {});
+  res.redirect(withFlash(`/admin/customers/${customer.id}`, res.locals.L.tookOver));
+});
+
+adminRouter.post('/customers/:id/release', async (req, res) => {
+  const customer = db.getCustomerById(Number(req.params.id));
+  if (!customer) return res.status(404).send('Not found');
+  db.setConversationState(customer.phone, 'DONE', {});
+  if (inServiceWindow(customer)) {
+    await send(text(customer.phone, t(normalizeLocale(customer.locale), 'handoffEnded'))).catch((err) =>
+      logger.error('Hand-back message failed:', err.message),
+    );
+  }
+  res.redirect(withFlash(`/admin/customers/${customer.id}`, res.locals.L.released));
+});
+
+// Media a customer sent (photo, voice note, document), looked up by message id only.
+adminRouter.get('/messages/:id/media', async (req, res) => {
+  const message = db.getMessage(Number(req.params.id));
+  if (!message?.media_id) return res.status(404).send('No media');
+  try {
+    const { contentType, buffer } = await downloadMedia(message.media_id);
+    res.set('Content-Type', contentType || 'application/octet-stream').set('Cache-Control', 'private, max-age=3600').send(buffer);
+  } catch (err) {
+    logger.error('Media download failed:', err.message);
+    res.status(502).send(`Could not fetch the file from WhatsApp: ${err.message}`);
+  }
+});
+
+/* ---------------------------- rider route sheet ------------------------ */
+
+adminRouter.get('/route', (req, res) => {
+  const { L, locale } = res.locals;
+  const day = isDay(req.query.day) ? req.query.day : localDay();
+  const url = routeUrl(day);
+  const { pending } = ordersForRoute(day);
+  const shareText = `${L.route.shareText} ${day} (${pending.length}) : ${url}`;
+  const body = `<p><a href="/admin?day=${day}">${views.esc(L.back)}</a></p>
+<h1>🛵 ${views.esc(L.route.title)} — ${views.esc(day)}</h1>
+<div class="card"><p>${views.esc(L.route.share)}</p><p><code style="word-break:break-all">${views.esc(url)}</code></p>
+<div class="actions"><a class="btn" style="background:var(--accent);color:var(--accent-ink)" href="https://wa.me/?text=${encodeURIComponent(shareText)}" target="_blank" rel="noopener noreferrer">${views.esc(L.route.sendWhatsApp)}</a></div></div>
+<h2>${views.esc(L.route.toDeliver)} (${pending.length})</h2>${pending.length ? `<div class="grid">${riderCards(L, pending)}</div>` : `<p class="muted">${views.esc(L.route.empty)}</p>`}`;
+  res.send(views.layout(L, { title: L.route.title, active: 'orders', body }));
 });

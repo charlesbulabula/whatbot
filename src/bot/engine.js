@@ -11,7 +11,7 @@ import * as db from '../db/index.js';
 import { t, money, productName, normalizeLocale, LOCALES, DEFAULT_LOCALE } from '../i18n/index.js';
 import * as M from './messages.js';
 import * as cart from './cart.js';
-import { rewardsAfterPayment, notifyAdmin, notifyAdminProof } from './orders.js';
+import { rewardsAfterPayment, notifyAdmin, notifyAdminProof, storeProof } from './orders.js';
 
 export const STATES = Object.freeze({
   WELCOME: 'WELCOME',
@@ -30,6 +30,7 @@ export const STATES = Object.freeze({
   RECAP: 'RECAP',
   AWAIT_PROOF: 'AWAIT_PROOF',
   RATING: 'RATING',
+  HUMAN: 'HUMAN',
   DONE: 'DONE',
 });
 
@@ -65,6 +66,7 @@ const KEYWORDS = {
   language: words('langue', 'language', 'lang'),
   optOut: words('stop', 'desabonner', 'desinscrire', 'unsubscribe'),
   optIn: words('abonner', 'subscribe'),
+  human: words('agent', 'humain', 'human', 'conseiller', 'operateur', 'support', 'parler a quelqu un', 'talk to someone'),
   yes: words('oui', 'yes', 'o', 'y', 'ok', 'd accord', 'daccord'),
   no: words('non', 'no', 'n'),
 };
@@ -121,7 +123,7 @@ function describeInbound(msg) {
  */
 export function handleInbound(msg) {
   const s = loadSession(msg);
-  db.logMessage(s.phone, 'in', describeInbound(msg));
+  db.logMessage(s.phone, 'in', describeInbound(msg), msg.mediaId);
   try {
     route(s, toInput(msg));
   } catch (err) {
@@ -135,8 +137,10 @@ export function handleInbound(msg) {
 }
 
 function route(s, input) {
-  if (input.type === 'audio') return reprompt(s, tr(s, 'voiceNotSupported'));
-  if (input.type === 'unsupported') return reprompt(s, tr(s, 'unsupportedMessage'));
+  // With a person answering, voice notes and stickers are fine: they are shown in the dashboard.
+  const human = s.state === STATES.HUMAN;
+  if (input.type === 'audio' && !human) return reprompt(s, tr(s, 'voiceNotSupported'));
+  if (input.type === 'unsupported' && !human) return reprompt(s, tr(s, 'unsupportedMessage'));
   if (input.norm && handleKeyword(s, input)) return;
   if (s.state !== STATES.AWAIT_PROOF && attachLateProof(s, input)) return;
   HANDLERS[s.state].handle(s, input);
@@ -272,11 +276,33 @@ function handleKeyword(s, input) {
     say(s, tr(s, 'optedIn'));
     return true;
   }
+  if (KEYWORDS.human.has(k) && s.state !== STATES.HUMAN) {
+    startHandoff(s);
+    return true;
+  }
   return false;
 }
 
+/** Pauses the bot for this customer and alerts the shop; they answer from the dashboard. */
+function startHandoff(s) {
+  s.state = STATES.HUMAN;
+  s.ctx = { profileName: s.ctx.profileName };
+  say(s, tr(s, 'handoffStarted'));
+  const c = s.customer;
+  s.tasks.push(() =>
+    notifyAdmin(
+      t(DEFAULT_LOCALE, 'adminHandoff', {
+        name: c.name || s.ctx.profileName || '?',
+        phone: c.phone,
+        url: `${config.publicUrl}/admin/customers/${c.id}`,
+      }),
+      [c.name || c.phone, 'agent'],
+    ),
+  );
+}
+
 function cancelFlow(s) {
-  if (IDLE.has(s.state)) return greetAndMenu(s);
+  if (IDLE.has(s.state) || s.state === STATES.HUMAN) return greetAndMenu(s);
   if (s.state === STATES.AWAIT_PROOF && s.ctx.orderId) {
     const order = db.getOrder(s.ctx.orderId);
     if (order?.status === 'awaiting_payment') db.setOrderStatus(order.id, 'cancelled');
@@ -382,7 +408,7 @@ function recordProof(s, orderId, mediaId) {
   db.setPaymentProof(orderId, mediaId);
   const order = db.getOrder(orderId);
   say(s, tr(s, 'proofReceived', { ref: order.reference }));
-  s.tasks.push(() => notifyAdminProof(order));
+  s.tasks.push(() => notifyAdminProof(order), () => storeProof(order));
 }
 
 function receiveProof(s, orderId, mediaId) {
@@ -792,6 +818,15 @@ const HANDLERS = {
       if (isProofMedia(input)) return receiveProof(s, s.ctx.orderId, input.mediaId);
       ask(s, tr(s, 'awaitingProof'));
     },
+  },
+
+  // A person from the shop is answering from the dashboard: the bot stays silent.
+  // "menu" or "annuler" (handled as keywords) hand the conversation back to the bot.
+  [STATES.HUMAN]: {
+    enter(s, intro) {
+      if (intro) say(s, intro);
+    },
+    handle() {},
   },
 
   [STATES.RATING]: {

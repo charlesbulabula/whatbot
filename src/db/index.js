@@ -12,6 +12,19 @@ if (config.dbPath !== ':memory:') fs.mkdirSync(path.dirname(config.dbPath), { re
 export const db = new Database(config.dbPath);
 db.exec(fs.readFileSync(path.join(here, 'schema.sql'), 'utf8'));
 
+// schema.sql always describes the latest schema for new databases. Databases
+// created by an older version get the missing columns added here, so a deploy
+// never loses data. Append new columns to this list; never remove entries.
+const ADDED_COLUMNS = [
+  ['orders', 'payment_proof_file', 'TEXT'],
+  ['messages', 'media_id', 'TEXT'],
+];
+for (const [table, column, type] of ADDED_COLUMNS) {
+  const exists = db.prepare(`SELECT 1 FROM pragma_table_info(?) WHERE name = ?`).get(table, column);
+  if (!exists) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
+}
+db.exec(fs.readFileSync(path.join(here, 'indexes.sql'), 'utf8'));
+
 // Timestamps are stored in UTC; "today" means today in the server's local
 // timezone (TZ=Africa/Kinshasa in production).
 const LOCAL_DAY = "date(created_at, 'localtime')";
@@ -269,7 +282,15 @@ export function setOrderStatus(id, status, { eta } = {}) {
 }
 
 export function setPaymentProof(id, mediaId) {
-  db.prepare('UPDATE orders SET payment_proof = ? WHERE id = ?').run(mediaId, id);
+  db.prepare('UPDATE orders SET payment_proof = ?, payment_proof_file = NULL WHERE id = ?').run(mediaId, id);
+}
+
+export function setPaymentProofFile(id, file) {
+  db.prepare('UPDATE orders SET payment_proof_file = ? WHERE id = ?').run(file, id);
+}
+
+export function ping() {
+  return db.prepare('SELECT 1 AS ok').get().ok === 1;
 }
 
 export function openOrdersToday(customerId) {
@@ -377,8 +398,31 @@ export function setOrderRating(id, rating) {
 
 /* ------------------------------ messages ------------------------------- */
 
-export function logMessage(phone, direction, body) {
-  db.prepare('INSERT INTO messages (phone, direction, body) VALUES (?, ?, ?)').run(phone, direction, body);
+export function logMessage(phone, direction, body, mediaId = null) {
+  db.prepare('INSERT INTO messages (phone, direction, body, media_id) VALUES (?, ?, ?, ?)').run(
+    phone,
+    direction,
+    body,
+    mediaId,
+  );
+}
+
+export function getMessage(id) {
+  return db.prepare('SELECT * FROM messages WHERE id = ?').get(id);
+}
+
+/** Conversations handed over to a person, with how many customer messages came in since. */
+export function handoffConversations() {
+  return db
+    .prepare(
+      `SELECT c.*, cv.updated_at AS handoff_at,
+              (SELECT COUNT(*) FROM messages m WHERE m.phone = c.phone AND m.direction = 'in'
+                 AND m.id > COALESCE((SELECT MAX(id) FROM messages o WHERE o.phone = c.phone AND o.direction = 'out'), 0)) AS unanswered
+         FROM conversations cv JOIN customers c ON c.phone = cv.phone
+        WHERE cv.state = 'HUMAN'
+        ORDER BY cv.updated_at`,
+    )
+    .all();
 }
 
 export function messagesFor(phone, limit = 60) {

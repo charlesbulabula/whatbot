@@ -21,6 +21,7 @@ export default {
     `• *menu* : revenir au début\n` +
     `• *annuler* : annuler la commande en cours\n` +
     `• *english* : switch to English\n` +
+    `• *agent* : parler à une personne\n` +
     `• *stop* : ne plus recevoir de rappels\n\n` +
     `Zones livrées : ${p.zones}`,
   cancelled: 'Commande annulée. Tapez *menu* quand vous voulez recommencer.',
@@ -128,6 +129,8 @@ export default {
     `🎉 Merci pour votre fidélité ! C’est votre ${p.count}ᵉ commande : *${p.amount}* de crédit offert pour la prochaine.`,
 
   customerFallbackName: 'cher client',
+  handoffStarted: 'Très bien, je préviens l’équipe 🙋 Une personne vous répond ici dès que possible.\nTapez *menu* pour revenir au bot.',
+  handoffEnded: 'L’équipe vous a répondu. Tapez *menu* quand vous voulez commander 🙂',
   cartReminder: 'Toujours là ? Votre commande vous attend 🙂',
 
   surveyPrompt: (p) => `Votre commande *${p.ref}* s’est-elle bien passée ? Donnez une note de 1 à 5 ⭐`,
@@ -156,5 +159,6 @@ export default {
 
   adminProof: (p) => `🧾 Preuve de paiement reçue\n${p.ref} — ${p.total}\n${p.name}, ${p.zone}\n${p.url}`,
   adminPaidByCredit: (p) => `🎁 Commande payée par crédit\n${p.ref}\n${p.name}, ${p.zone}\n${p.url}`,
+  adminHandoff: (p) => `🙋 ${p.name} (+${p.phone}) demande à parler à quelqu’un\n${p.url}`,
   adminBadRating: (p) => `⚠️ Note ${p.rating}/5 sur ${p.ref} (${p.name}, +${p.phone})`,
 };

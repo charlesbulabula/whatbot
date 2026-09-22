@@ -116,7 +116,15 @@ function quantitiesTable(L, locale, rows, valueKey, emptyLabel) {
   return `<div class="scroll"><table><tr><th></th><th>${esc(L.sizes.small)}</th><th>${esc(L.sizes.medium)}</th><th>${esc(L.sizes.large)}</th></tr>${body}</table></div>`;
 }
 
-export function dashboardPage(L, locale, { day, prevDay, nextDay, isToday, orders, kpis, shopping, forecast, flash }) {
+function handoffList(L, handoffs) {
+  if (!handoffs.length) return '';
+  const items = handoffs
+    .map((c) => `<li><a href="/admin/customers/${c.id}"><b>${esc(c.name || `+${c.phone}`)}</b></a>${c.unanswered ? ` <span class="chip s-awaiting_payment">${c.unanswered} ${esc(L.unanswered)}</span>` : ''}</li>`)
+    .join('');
+  return `<div class="card" style="border-color:var(--accent);margin-bottom:12px"><b>🙋 ${esc(L.handoffs)} (${handoffs.length})</b><ul>${items}</ul></div>`;
+}
+
+export function dashboardPage(L, locale, { day, prevDay, nextDay, isToday, orders, kpis, shopping, forecast, handoffs = [], flash }) {
   const back = `/admin?day=${day}`;
   const byZone = new Map();
   for (const o of orders) {
@@ -127,10 +135,11 @@ export function dashboardPage(L, locale, { day, prevDay, nextDay, isToday, order
   const zones = [...byZone.entries()]
     .map(([zone, list]) => `<h2>📍 ${esc(zone)} <span class="muted">(${list.length})</span></h2><div class="grid">${list.map((o) => orderCard(L, locale, o, back)).join('')}</div>`)
     .join('');
-  const body = `
+  const body = `${handoffList(L, handoffs)}
 <div class="daynav"><a class="btn" href="/admin?day=${prevDay}">${esc(L.prevDay)}</a>
 <form method="get" action="/admin" class="inline"><input type="date" name="day" value="${esc(day)}" onchange="this.form.submit()"></form>
-<a class="btn" href="/admin?day=${nextDay}">${esc(L.nextDay)}</a>${isToday ? '' : `<a class="btn" href="/admin">${esc(L.today)}</a>`}</div>
+<a class="btn" href="/admin?day=${nextDay}">${esc(L.nextDay)}</a>${isToday ? '' : `<a class="btn" href="/admin">${esc(L.today)}</a>`}
+<a class="btn" href="/admin/route?day=${day}">${esc(L.route.button)}</a></div>
 <div class="kpis">
 <div class="kpi"><b>${kpis.orders}</b><span>${esc(L.kpiOrders)}</span></div>
 <div class="kpi"><b>${esc(money(locale, kpis.revenueDay))}</b><span>${esc(L.kpiRevenueDay)}</span></div>
@@ -138,8 +147,9 @@ export function dashboardPage(L, locale, { day, prevDay, nextDay, isToday, order
 <div class="kpi"><b>${kpis.toCheck}</b><span>${esc(L.kpiToCheck)}</span></div></div>
 <h2>🧺 ${esc(L.shoppingList)}</h2>${quantitiesTable(L, locale, shopping, 'qty', L.noOrders)}
 ${zones || `<h2>${esc(L.ordersOf)} ${esc(day)}</h2><p class="muted">${esc(L.noOrders)}</p>`}
-<h2>📈 ${esc(L.forecast)}</h2>${quantitiesTable(L, locale, forecast, 'weekly_avg', L.noData)}`;
-  return layout(L, { title: L.title, active: 'orders', body, flash });
+<h2>📈 ${esc(L.forecast)}</h2>${quantitiesTable(L, locale, forecast, 'weekly_avg', L.noData)}${isToday ? autoRefresh(60) : ''}`;
+  const pending = kpis.toCheck + handoffs.length;
+  return layout(L, { title: `${pending ? `(${pending}) ` : ''}${L.title}`, active: 'orders', body, flash });
 }
 
 export function orderPage(L, locale, { order, messages, flash }) {
@@ -149,14 +159,32 @@ export function orderPage(L, locale, { order, messages, flash }) {
 ${order.rating ? `<p>${esc(L.rating)} : ${'⭐'.repeat(order.rating)}</p>` : ''}
 ${order.payment_proof ? `<h2>🧾 ${esc(L.proof)}</h2><img src="/admin/orders/${order.id}/proof" alt="" style="max-width:100%;max-height:70vh;border-radius:12px;border:1px solid var(--line)">` : ''}
 <h2>💬 ${esc(L.conversation)} — <a href="/admin/customers/${order.customer.id}">${esc(order.customer.name || order.customer.phone)}</a></h2>
-${chat(messages)}`;
+${chat(L, messages)}`;
   return layout(L, { title: order.reference, active: 'orders', body, flash });
 }
 
-function chat(messages) {
+function mediaBlock(L, m) {
+  if (!m.media_id) return '';
+  const src = `/admin/messages/${m.id}/media`;
+  const kind = String(m.body || '').match(/^\((image|audio|document)\)/)?.[1];
+  if (kind === 'image') return `<a href="${src}" target="_blank"><img src="${src}" alt="" loading="lazy" style="display:block;max-width:220px;border-radius:8px;margin-top:4px"></a>`;
+  if (kind === 'audio') return `<div>🎤 ${esc(L.media.audio)}</div><audio controls preload="none" src="${src}" style="max-width:100%"></audio>`;
+  return `<a href="${src}" target="_blank">${esc(L.media.document)}</a>`;
+}
+
+function chat(L, messages) {
   return `<div class="chat">${messages
-    .map((m) => `<div class="msg ${m.direction === 'in' ? 'in' : 'out'}">${linkify(m.body)}<small>${esc(m.created_at)} UTC</small></div>`)
+    .map((m) => {
+      const time = new Date(`${m.created_at.replace(' ', 'T')}Z`).toLocaleString(L.lang === 'en' ? 'en-GB' : 'fr-FR', { dateStyle: 'short', timeStyle: 'short' });
+      return `<div class="msg ${m.direction === 'in' ? 'in' : 'out'}">${linkify(m.body)}${mediaBlock(L, m)}<small>${esc(time)}</small></div>`;
+    })
     .join('')}</div>`;
+}
+
+/** Reloads the page every `seconds` unless the admin is typing or a form field was edited. */
+function autoRefresh(seconds) {
+  return `<script>(function(){var dirty=false;document.addEventListener('input',function(){dirty=true});
+setInterval(function(){var a=document.activeElement;if(dirty||(a&&/INPUT|TEXTAREA|SELECT/.test(a.tagName)))return;location.reload()},${seconds * 1000});})();</script>`;
 }
 
 export function productsPage(L, locale, { products, flash }) {
@@ -204,7 +232,22 @@ export function customersPage(L, locale, { customers }) {
   return layout(L, { title: L.customers, active: 'customers', body });
 }
 
-export function customerPage(L, locale, { customer, orders, messages }) {
+export function customerPage(L, locale, { customer, orders, messages, state, canReply, flash }) {
+  const human = state === 'HUMAN';
+  const controls = `<div class="card" style="margin-top:12px">
+${human ? `<p><b>${esc(L.botPaused)}</b></p>` : ''}
+${canReply
+    ? `<form method="post" action="/admin/customers/${customer.id}/reply"><label for="reply"><b>${esc(L.reply)}</b></label>
+<textarea id="reply" name="body" rows="3" required maxlength="4000" style="display:block;width:100%;margin:6px 0;font:inherit;padding:8px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink)"></textarea>
+<button class="primary">${esc(L.send)}</button></form>`
+    : `<p class="muted">${esc(L.windowClosed)}</p>`}
+<div class="actions">${human
+    ? `<form method="post" action="/admin/customers/${customer.id}/release" class="inline"><button>${esc(L.release)}</button></form>`
+    : `<form method="post" action="/admin/customers/${customer.id}/takeover" class="inline"><button>${esc(L.takeOver)}</button></form>`}</div></div>`;
+  return customerDetail(L, locale, { customer, orders, messages, controls, flash, refresh: human });
+}
+
+function customerDetail(L, locale, { customer, orders, messages, controls, flash, refresh }) {
   const rows = orders
     .map((o) => `<tr><td><a href="/admin/orders/${o.id}">${esc(o.reference)}</a></td><td>${statusChip(L, o.status)}</td><td>${esc(money(locale, o.total))}</td><td>${o.rating ? '⭐'.repeat(o.rating) : ''}</td></tr>`)
     .join('');
@@ -215,6 +258,6 @@ export function customerPage(L, locale, { customer, orders, messages }) {
 ${esc(L.spent)} : ${esc(money(locale, customer.total_spent))} · ${esc(L.credit)} : ${esc(money(locale, customer.credit))} ·
 ${esc(L.referralCode)} : ${esc(customer.referral_code)} · ${esc(L.lastSeen)} : ${esc(customer.last_seen_at || '')} UTC</div></div>
 <h2>${esc(L.history)}</h2><div class="scroll"><table>${rows}</table></div>
-<h2>💬 ${esc(L.conversation)}</h2>${chat(messages)}`;
-  return layout(L, { title: customer.name || customer.phone, active: 'customers', body });
+<h2>💬 ${esc(L.conversation)}</h2>${chat(L, messages)}${controls}${refresh ? autoRefresh(15) : ''}`;
+  return layout(L, { title: customer.name || customer.phone, active: 'customers', body, flash });
 }

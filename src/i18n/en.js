@@ -20,6 +20,7 @@ export default {
     `• *menu*: back to the start\n` +
     `• *cancel*: cancel the current order\n` +
     `• *français*: passer en français\n` +
+    `• *agent*: talk to a person\n` +
     `• *stop*: no more reminders\n\n` +
     `Delivery areas: ${p.zones}`,
   cancelled: 'Order cancelled. Type *menu* whenever you want to start again.',
@@ -125,6 +126,8 @@ export default {
     `🎉 Thank you for your loyalty! This is your order #${p.count}: *${p.amount}* of credit for next time.`,
 
   customerFallbackName: 'dear customer',
+  handoffStarted: 'Sure, I am letting the team know 🙋 Someone will answer you here as soon as possible.\nType *menu* to go back to the bot.',
+  handoffEnded: 'The team has answered you. Type *menu* whenever you want to order 🙂',
   cartReminder: 'Still there? Your order is waiting for you 🙂',
 
   surveyPrompt: (p) => `How did order *${p.ref}* go? Please rate it from 1 to 5 ⭐`,
@@ -152,5 +155,6 @@ export default {
 
   adminProof: (p) => `🧾 Payment proof received\n${p.ref} — ${p.total}\n${p.name}, ${p.zone}\n${p.url}`,
   adminPaidByCredit: (p) => `🎁 Order paid with credit\n${p.ref}\n${p.name}, ${p.zone}\n${p.url}`,
+  adminHandoff: (p) => `🙋 ${p.name} (+${p.phone}) asks to talk to someone\n${p.url}`,
   adminBadRating: (p) => `⚠️ Rating ${p.rating}/5 on ${p.ref} (${p.name}, +${p.phone})`,
 };

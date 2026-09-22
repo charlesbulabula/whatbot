@@ -5,6 +5,7 @@ import { logger } from './utils/logger.js';
 import { seedIfEmpty } from './db/seed.js';
 import { webhookRouter } from './whatsapp/webhook.js';
 import { adminRouter } from './admin/router.js';
+import { routeRouter } from './admin/route.js';
 import { startScheduler } from './jobs/scheduler.js';
 
 const missing = assertConfig();
@@ -30,6 +31,7 @@ app.use(
 app.get('/healthz', (_req, res) => res.json({ ok: true }));
 app.use(webhookRouter);
 app.use('/admin', adminRouter);
+app.use('/route', routeRouter);
 app.get('/', (_req, res) => res.redirect('/admin'));
 
 app.use((err, _req, res, _next) => {

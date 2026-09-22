@@ -54,6 +54,7 @@ CREATE TABLE IF NOT EXISTS orders (
   neighborhood      TEXT,
   address_note      TEXT,
   payment_proof     TEXT,                            -- WhatsApp media id of the screenshot
+  payment_proof_file TEXT,                           -- local copy (Meta media links expire)
   eta               TEXT,
   rating            INTEGER,
   created_at        TEXT NOT NULL DEFAULT (datetime('now')),
@@ -77,6 +78,7 @@ CREATE TABLE IF NOT EXISTS messages (
   phone             TEXT NOT NULL,
   direction         TEXT NOT NULL,                   -- in | out
   body              TEXT,
+  media_id          TEXT,                            -- inbound image / voice note / document
   created_at        TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -89,9 +91,3 @@ CREATE TABLE IF NOT EXISTS settings (
   key               TEXT PRIMARY KEY,
   value             TEXT
 );
-
-CREATE INDEX IF NOT EXISTS idx_orders_created  ON orders(created_at);
-CREATE INDEX IF NOT EXISTS idx_orders_customer ON orders(customer_id, created_at);
-CREATE INDEX IF NOT EXISTS idx_orders_status   ON orders(status);
-CREATE INDEX IF NOT EXISTS idx_items_order     ON order_items(order_id);
-CREATE INDEX IF NOT EXISTS idx_messages_phone  ON messages(phone, created_at);

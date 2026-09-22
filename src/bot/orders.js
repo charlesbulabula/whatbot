@@ -1,10 +1,13 @@
 // Order lifecycle side effects shared by the chat engine and the admin dashboard.
+import fs from 'node:fs';
+import path from 'node:path';
 import { config } from '../config.js';
 import { logger } from '../utils/logger.js';
 import * as db from '../db/index.js';
 import { t, money, normalizeLocale, DEFAULT_LOCALE } from '../i18n/index.js';
 import { text } from './messages.js';
 import { notify } from './notify.js';
+import { downloadMedia } from '../whatsapp/client.js';
 
 const STATUS_MESSAGE = {
   paid: 'statusPaid',
@@ -110,3 +113,21 @@ export function notifyAdminProof(order, { paidByCredit = false } = {}) {
 }
 
 export { fallbackName };
+
+const EXTENSIONS = { 'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '.webp', 'application/pdf': '.pdf' };
+
+/**
+ * Keeps a local copy of a payment screenshot: WhatsApp media links expire after
+ * a few weeks, and the proof must stay available for accounting disputes.
+ * Returns the file path, or null when WhatsApp is disabled (dev/tests).
+ */
+export async function storeProof(order) {
+  if (!order?.payment_proof || !config.whatsapp.enabled || config.dbPath === ':memory:') return null;
+  const { contentType, buffer } = await downloadMedia(order.payment_proof);
+  const dir = path.join(path.dirname(config.dbPath), 'proofs');
+  fs.mkdirSync(dir, { recursive: true });
+  const file = path.join(dir, `${order.reference}${EXTENSIONS[contentType] || '.bin'}`);
+  fs.writeFileSync(file, buffer);
+  db.setPaymentProofFile(order.id, file);
+  return file;
+}

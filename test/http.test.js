@@ -85,3 +85,78 @@ test('every dashboard page renders, in both languages', async () => {
     }
   }
 });
+
+test('admin can take over a conversation, reply inside the 24h window, and hand it back', async () => {
+  const phone = '243840000009';
+  const { handleInbound } = await import('../src/bot/engine.js');
+  handleInbound({ id: 'wamid.http-h1', from: phone, type: 'text', text: 'Bonjour' });
+  const customer = db.getCustomer(phone);
+  const post = (path, body = '') =>
+    fetch(`${base}${path}`, {
+      method: 'POST',
+      redirect: 'manual',
+      headers: { authorization: auth, origin: base, 'content-type': 'application/x-www-form-urlencoded' },
+      body,
+    });
+
+  assert.equal((await post(`/admin/customers/${customer.id}/takeover`)).status, 302);
+  assert.equal(db.getConversation(phone).state, 'HUMAN');
+  const dash = await (await fetch(`${base}/admin`, { headers: { authorization: auth } })).text();
+  assert.match(dash, /Clients qui attendent une personne \(1\)/);
+
+  const reply = await post(`/admin/customers/${customer.id}/reply`, 'body=' + encodeURIComponent('Oui, nous livrons à Masina 🙂'));
+  assert.match(decodeURIComponent(reply.headers.get('location')), /Message envoyé/);
+  assert.ok(db.messagesFor(phone).some((m) => m.direction === 'out' && m.body === 'Oui, nous livrons à Masina 🙂'));
+
+  const page = await (await fetch(`${base}/admin/customers/${customer.id}`, { headers: { authorization: auth } })).text();
+  assert.match(page, /Rendre la main au bot/);
+
+  assert.equal((await post(`/admin/customers/${customer.id}/release`)).status, 302);
+  assert.equal(db.getConversation(phone).state, 'DONE');
+});
+
+test('rider route sheet: secret per-day link, rider marks an order delivered, forged links refused', async () => {
+  const { handleInbound } = await import('../src/bot/engine.js');
+  const { setOrderStatus } = db;
+  const phone = '243840000010';
+  let n = 0;
+  const say = (msg) => handleInbound({ id: `wamid.route${++n}`, from: phone, type: 'text', ...msg });
+  const tap = (id) => say({ type: 'interactive', replyId: id, text: id });
+  say({ text: 'Bonjour' });
+  tap('menu:order'); tap('p:2'); tap('size:small'); tap('qty:1'); tap('more:checkout'); // p:1 was marked sold out above
+  say({ text: 'Rider Test' }); tap('zone:0'); say({ text: 'Av. du Livreur 7' }); tap('recap:confirm');
+  const order = db.lastOrder(db.getCustomer(phone).id);
+  setOrderStatus(order.id, 'paid');
+
+  const adminPage = await (await fetch(`${base}/admin/route`, { headers: { authorization: auth } })).text();
+  const link = adminPage.match(/\/route\/\d{4}-\d{2}-\d{2}\/[0-9a-f]{32}/)[0];
+  assert.match(adminPage, /Envoyer au livreur par WhatsApp/);
+
+  const rider = await fetch(`${base}${link}`);
+  assert.equal(rider.status, 200);
+  assert.equal(rider.headers.get('referrer-policy'), 'no-referrer');
+  const html = await rider.text();
+  assert.match(html, /Rider Test/);
+  assert.match(html, /Av\. du Livreur 7/);
+
+  const forged = link.replace(/[0-9a-f]{4}$/, '0000');
+  assert.equal((await fetch(`${base}${forged}`)).status, 404);
+  assert.equal((await fetch(`${base}/route/2020-01-01/${'a'.repeat(32)}`)).status, 404);
+
+  const done = await fetch(`${base}${link}/orders/${order.id}`, {
+    method: 'POST',
+    redirect: 'manual',
+    headers: { origin: base, 'content-type': 'application/x-www-form-urlencoded' },
+    body: 'status=delivered',
+  });
+  assert.equal(done.status, 302);
+  assert.equal(db.getOrder(order.id).status, 'delivered');
+
+  const again = await fetch(`${base}${link}/orders/${order.id}`, {
+    method: 'POST',
+    redirect: 'manual',
+    headers: { origin: base, 'content-type': 'application/x-www-form-urlencoded' },
+    body: 'status=cancelled',
+  });
+  assert.equal(again.status, 400, 'a rider can only mark on the way / delivered');
+});
