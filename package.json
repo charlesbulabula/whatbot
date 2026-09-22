@@ -1,0 +1,20 @@
+{
+  "name": "whatbot",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Chatbot WhatsApp pour la livraison d'epices fraiches (Kinshasa) - API WhatsApp Cloud + Express + SQLite",
+  "type": "module",
+  "main": "src/index.js",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "seed": "node src/db/seed.js",
+    "test": "node --test test/"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.3.0",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.1"
+  }
+}
