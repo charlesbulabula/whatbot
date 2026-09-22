@@ -30,6 +30,7 @@ export const STATES = Object.freeze({
   RECAP: 'RECAP',
   AWAIT_PROOF: 'AWAIT_PROOF',
   RATING: 'RATING',
+  NLU_CONFIRM: 'NLU_CONFIRM',
   HUMAN: 'HUMAN',
   DONE: 'DONE',
 });
@@ -51,6 +52,16 @@ export const REMINDABLE_STATES = [
   STATES.AWAIT_PROOF,
 ];
 
+/** Steps where a free-text order ("2 tas de tomates...") is worth sending to Claude, see enrich.js. */
+export const UNDERSTANDING_STATES = [
+  STATES.WELCOME,
+  STATES.DONE,
+  STATES.MENU,
+  STATES.PICK_PRODUCT,
+  STATES.ADD_MORE,
+  STATES.NLU_CONFIRM,
+];
+
 const STALE_AFTER_HOURS = 24;
 const MAX_QTY = 20;
 
@@ -70,6 +81,11 @@ const KEYWORDS = {
   yes: words('oui', 'yes', 'o', 'y', 'ok', 'd accord', 'daccord'),
   no: words('non', 'no', 'n'),
 };
+
+/** True for the words that act as commands at any step (menu, annuler, aide...). */
+export function isKeyword(norm) {
+  return Object.values(KEYWORDS).some((set) => set.has(norm));
+}
 
 /** Lowercase, strip accents, emoji and punctuation: "Épicés !" -> "epices". */
 export function normalize(s) {
@@ -107,6 +123,8 @@ function toInput(msg) {
     norm: msg.type === 'text' ? normalize(msg.text) : '',
     mediaId: msg.mediaId || null,
     location: msg.location || null,
+    geo: msg.geo || null, // { zone, place } from reverse geocoding, see enrich.js
+    nlu: msg.nlu?.items ? msg.nlu : null, // { items, unknown } understood by Claude, see enrich.js
   };
 }
 
@@ -240,6 +258,27 @@ function formatLocation(loc) {
   return `${label ? `${label} ` : ''}📍 https://maps.google.com/?q=${loc.latitude},${loc.longitude}`;
 }
 
+/**
+ * A shared location whose commune is a served zone becomes the full delivery
+ * address (zone + map link), skipping the zone and address questions.
+ * Returns true when it was applied.
+ */
+function applyDetectedLocation(s, input, name) {
+  if (!input.location || !input.geo?.zone || !name) return false;
+  const note = formatLocation({ ...input.location, name: input.location.name || input.geo.place });
+  s.customer = db.updateCustomer(s.customer.id, { name, neighborhood: input.geo.zone, address_note: note });
+  s.ctx.delivery = { name, zone: input.geo.zone, note };
+  delete s.ctx.draft;
+  go(s, STATES.RECAP, tr(s, 'zoneDetected', { zone: input.geo.zone }));
+  return true;
+}
+
+/** Explains why a shared location could not be used as the delivery zone. */
+function locationProblem(s, input) {
+  if (input.geo?.place) return tr(s, 'zoneNotServed', { zone: input.geo.place, zones: config.shop.zones.join(', ') });
+  return tr(s, 'zoneNotDetected');
+}
+
 const nowSqlite = () => new Date().toISOString().replace('T', ' ').slice(0, 19);
 
 /* ------------------------------ global flow ---------------------------- */
@@ -348,6 +387,7 @@ function startOrder(s, { reorder = false, skipChecks = false } = {}) {
     }
   }
   s.ctx.cart = s.ctx.cart || [];
+  if (s.ctx.nluItems) return go(s, STATES.NLU_CONFIRM);
   if (!reorder) return go(s, STATES.PICK_PRODUCT);
 
   const { items, missing } = cart.fromOrder(db.lastOrder(s.customer.id));
@@ -357,6 +397,16 @@ function startOrder(s, { reorder = false, skipChecks = false } = {}) {
     : null;
   if (!items.length) return go(s, STATES.PICK_PRODUCT, note);
   return goCheckout(s, join(note, cartText(s)));
+}
+
+/** A free-text order was understood: confirm it (after the usual capacity / duplicate checks). */
+function startUnderstoodOrder(s, nlu) {
+  s.ctx.nluItems = nlu.items;
+  s.ctx.nluUnknown = nlu.unknown;
+  if (s.state === STATES.PICK_PRODUCT || s.state === STATES.ADD_MORE || s.state === STATES.NLU_CONFIRM) {
+    return go(s, STATES.NLU_CONFIRM);
+  }
+  return startOrder(s);
 }
 
 function goCheckout(s, intro) {
@@ -460,6 +510,10 @@ const idle = {
       s.state = STATES.MENU;
       return HANDLERS.MENU.handle(s, input);
     }
+    if (input.nlu) {
+      s.ctx = { profileName: s.ctx.profileName };
+      return startUnderstoodOrder(s, input.nlu);
+    }
     const referral = applyReferral(s, input.raw);
     greetAndMenu(s, null, referral);
   },
@@ -483,6 +537,7 @@ const HANDLERS = {
         setLocale(s, otherLocale(s));
         return reprompt(s, tr(s, 'languageSet'));
       }
+      if (input.nlu) return startUnderstoodOrder(s, input.nlu);
       const referral = applyReferral(s, input.raw);
       if (referral) return reprompt(s, referral);
       reprompt(s, tr(s, 'invalidChoice'));
@@ -513,7 +568,8 @@ const HANDLERS = {
           s.ctx.cart = cart.fromOrder(order).items;
           s.ctx.replacesOrderId = order.id;
           delete s.ctx.dup;
-          return go(s, STATES.PICK_PRODUCT, tr(s, 'mergeIntro', { ref: order.reference }));
+          const intro = tr(s, 'mergeIntro', { ref: order.reference });
+          return go(s, s.ctx.nluItems ? STATES.NLU_CONFIRM : STATES.PICK_PRODUCT, intro);
         }
       }
       if (id === 'dup:new') {
@@ -573,6 +629,7 @@ const HANDLERS = {
         s.ctx.pending = { productId: product.id };
         return go(s, STATES.PICK_SIZE);
       }
+      if (input.nlu) return startUnderstoodOrder(s, input.nlu);
       reprompt(s, tr(s, 'invalidChoice'));
     },
   },
@@ -637,6 +694,7 @@ const HANDLERS = {
       if (id === 'more:add') return go(s, STATES.PICK_PRODUCT);
       if (id === 'more:checkout') return goCheckout(s);
       if (id === 'more:edit') return go(s, STATES.EDIT_CART);
+      if (input.nlu) return startUnderstoodOrder(s, input.nlu);
       reprompt(s, tr(s, 'invalidChoice'));
     },
   },
@@ -681,6 +739,10 @@ const HANDLERS = {
       ]);
     },
     handle(s, input) {
+      if (input.location) {
+        if (applyDetectedLocation(s, input, s.customer.name)) return;
+        return reprompt(s, locationProblem(s, input));
+      }
       const id = pick(s, input) || (isYes(input) ? 'addr:yes' : isNo(input) ? 'addr:change' : null);
       if (id === 'addr:yes') {
         const c = s.customer;
@@ -717,6 +779,10 @@ const HANDLERS = {
       offer(s, join(intro, tr(s, 'askZone')), options, { buttonLabel: tr(s, 'zoneButton') });
     },
     handle(s, input) {
+      if (input.location) {
+        if (applyDetectedLocation(s, input, s.ctx.draft?.name || s.customer.name)) return;
+        return reprompt(s, locationProblem(s, input));
+      }
       const id = pick(s, input);
       if (id?.startsWith('zone:') && id !== 'zone:other') {
         s.ctx.draft = { ...(s.ctx.draft || { name: s.customer.name }), zone: config.shop.zones[Number(id.slice(5))] };
@@ -738,7 +804,10 @@ const HANDLERS = {
     handle(s, input) {
       let note = null;
       if (input.replyId === 'addr:same') note = s.customer.address_note;
-      else if (input.location) note = formatLocation(input.location);
+      else if (input.location) {
+        if (input.geo?.zone) s.ctx.draft = { ...s.ctx.draft, zone: input.geo.zone };
+        note = formatLocation({ ...input.location, name: input.location.name || input.geo?.place });
+      }
       else if (!input.replyId && input.type === 'text' && input.raw.length >= 3) note = input.raw.slice(0, 300);
       if (!note) return reprompt(s, tr(s, 'invalidAddress'));
 
@@ -816,7 +885,55 @@ const HANDLERS = {
     },
     handle(s, input) {
       if (isProofMedia(input)) return receiveProof(s, s.ctx.orderId, input.mediaId);
+      // A menu button from an earlier message: let the customer move on. The order stays
+      // awaiting payment and a screenshot sent later is still attached to it.
+      if (input.replyId?.startsWith('menu:')) return idle.handle(s, input);
       ask(s, tr(s, 'awaitingProof'));
+    },
+  },
+
+  // "J'ai compris : 2 × Moyen tas Tomate... C'est correct ?" Nothing is added before the customer says yes.
+  [STATES.NLU_CONFIRM]: {
+    enter(s, intro) {
+      const items = (s.ctx.nluItems || []).map((it) => ({ ...it, product: db.getProduct(it.productId) })).filter((it) => it.product);
+      if (!items.length) {
+        const missing = s.ctx.nluUnknown?.length ? tr(s, 'nluUnknown', { items: s.ctx.nluUnknown.join(', ') }) : null;
+        delete s.ctx.nluItems;
+        delete s.ctx.nluUnknown;
+        return go(s, STATES.PICK_PRODUCT, join(intro, missing));
+      }
+      const lines = items.map((it) => `• ${cart.describeItem(s.locale, it.product, it.size, it.qty)} — ${fmt(s, cart.priceOf(it.product, it.size) * it.qty)}`);
+      const unknown = s.ctx.nluUnknown?.length ? tr(s, 'nluUnknown', { items: s.ctx.nluUnknown.join(', ') }) : null;
+      offer(s, join(intro, `${tr(s, 'nluUnderstood')}\n${lines.join('\n')}`, unknown, tr(s, 'nluConfirm')), [
+        { id: 'nlu:yes', title: tr(s, 'btnYes') },
+        { id: 'nlu:no', title: tr(s, 'btnNluChoose') },
+      ]);
+    },
+    handle(s, input) {
+      if (input.nlu) return startUnderstoodOrder(s, input.nlu); // the customer corrected the order in words
+      const id = pick(s, input) || (isYes(input) ? 'nlu:yes' : isNo(input) ? 'nlu:no' : null);
+      if (id === 'nlu:no') {
+        delete s.ctx.nluItems;
+        delete s.ctx.nluUnknown;
+        return go(s, STATES.PICK_PRODUCT);
+      }
+      if (id !== 'nlu:yes') return reprompt(s, tr(s, 'invalidChoice'));
+      const added = [];
+      const soldOut = [];
+      for (const it of s.ctx.nluItems || []) {
+        const product = db.getProduct(it.productId);
+        if (!product?.in_stock) {
+          if (product) soldOut.push(productName(product, s.locale));
+          continue;
+        }
+        s.ctx.cart = cart.addItem(s.ctx.cart || [], product.id, it.size, it.qty);
+        added.push(cart.describeItem(s.locale, product, it.size, it.qty));
+      }
+      delete s.ctx.nluItems;
+      delete s.ctx.nluUnknown;
+      const note = soldOut.length ? tr(s, 'itemsRemovedOOS', { items: soldOut.join(', ') }) : null;
+      if (!added.length) return go(s, STATES.PICK_PRODUCT, note);
+      go(s, STATES.ADD_MORE, join(note, added.map((item) => tr(s, 'added', { item })).join('\n')));
     },
   },
 

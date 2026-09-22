@@ -160,3 +160,35 @@ test('rider route sheet: secret per-day link, rider marks an order delivered, fo
   });
   assert.equal(again.status, 400, 'a rider can only mark on the way / delivered');
 });
+
+test('stats page renders every period, and the CSV export opens in Excel', async () => {
+  for (const days of [7, 30, 90]) {
+    const res = await fetch(`${base}/admin/stats?days=${days}`, { headers: { authorization: auth } });
+    assert.equal(res.status, 200);
+    const html = await res.text();
+    assert.match(html, /Chiffre d’affaires par jour/);
+    assert.equal((html.match(/class="col"/g) || []).length, days, 'one column per day');
+  }
+  const csv = await fetch(`${base}/admin/export.csv`, { headers: { authorization: auth } });
+  assert.equal(csv.status, 200);
+  assert.match(csv.headers.get('content-disposition'), /commandes-\d{4}-\d{2}-\d{2}-\d{4}-\d{2}-\d{2}\.csv/);
+  const bytes = Buffer.from(await csv.arrayBuffer()); // fetch().text() would strip the BOM
+  assert.deepEqual([...bytes.subarray(0, 3)], [0xef, 0xbb, 0xbf], 'UTF-8 BOM so Excel reads accents');
+  const text = bytes.toString('utf8');
+  assert.match(text, /^\uFEFFreference;date;status;customer/);
+  assert.match(text, /Rider Test/);
+});
+
+// Keep last: it locks 127.0.0.1 out of the dashboard for the rest of this file.
+test('health check reports the database, and repeated wrong passwords are throttled', async () => {
+  const health = await (await fetch(`${base}/healthz`)).json();
+  assert.equal(health.ok, true);
+
+  const wrong = `Basic ${Buffer.from('admin:wrong').toString('base64')}`;
+  const statuses = [];
+  for (let i = 0; i < 11; i++) statuses.push((await fetch(`${base}/admin`, { headers: { authorization: wrong } })).status);
+  assert.deepEqual(statuses.slice(0, 10), Array(10).fill(401));
+  assert.equal(statuses[10], 429);
+  // Even the right password waits until the window passes, from that IP.
+  assert.equal((await fetch(`${base}/admin`, { headers: { authorization: auth } })).status, 429);
+});

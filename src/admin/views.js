@@ -16,9 +16,9 @@ const NEXT_STATUSES = {
 };
 
 const STYLE = `
-:root{--bg:#f6f4ef;--card:#fff;--ink:#1f1d1a;--muted:#6b6660;--line:#e4dfd6;--accent:#b4451f;--accent-ink:#fff;
+:root{--bg:#f6f4ef;--card:#fff;--ink:#1f1d1a;--muted:#6b6660;--line:#e4dfd6;--accent:#b4451f;--accent-ink:#fff;--chart:#b4451f;
 --ok:#2f7d4a;--warn:#a86a00;--bad:#b3261e;--chip:#efe9df}
-@media (prefers-color-scheme:dark){:root{--bg:#161412;--card:#201d1a;--ink:#f1ece4;--muted:#a59e94;--line:#34302b;
+@media (prefers-color-scheme:dark){:root{--bg:#161412;--card:#201d1a;--ink:#f1ece4;--muted:#a59e94;--line:#34302b;--chart:#d9693f;
 --accent:#e0714a;--accent-ink:#1a1512;--ok:#6cc08a;--warn:#e2b04a;--bad:#f08a80;--chip:#2c2824}}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
 a{color:var(--accent)}header{position:sticky;top:0;z-index:2;background:var(--card);border-bottom:1px solid var(--line)}
@@ -43,6 +43,17 @@ th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);verti
 .msg.in{background:var(--chip);align-self:flex-start}.msg.out{background:var(--card);border:1px solid var(--line);align-self:flex-end}
 .msg small{display:block;color:var(--muted);font-size:.75rem;margin-top:3px}form.inline{display:inline}
 .daynav{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
+.btn.on{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.chart{position:relative;height:220px;margin:8px 0 28px 44px}.chart .gl{position:absolute;left:0;right:0;border-top:1px solid var(--line)}
+.chart .gl span{position:absolute;right:calc(100% + 6px);top:-.6em;font-size:.72rem;color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap}
+.cols{position:absolute;inset:0;display:flex;align-items:flex-end}.col{flex:1 1 0;min-width:0;height:100%;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;position:relative;outline:none;cursor:default}
+.col .colbar{width:min(24px,62%);background:var(--chart);border-radius:4px 4px 0 0;min-height:0}.col:hover .colbar,.col:focus .colbar{filter:brightness(1.18)}
+.col .cap{position:absolute;font-size:.72rem;color:var(--ink);font-weight:600;white-space:nowrap}
+.col .x{position:absolute;top:calc(100% + 6px);font-size:.72rem;color:var(--muted);white-space:nowrap}
+.col:first-child .x{left:0}.col:last-child .x{right:0}
+@media (max-width:600px){.col .x.minor{display:none}}
+.tip{position:absolute;pointer-events:none;background:var(--card);border:1px solid var(--line);border-radius:8px;padding:6px 9px;font-size:.82rem;box-shadow:0 4px 14px rgba(0,0,0,.12);display:none;white-space:nowrap;z-index:3}
+.tip b{display:block;font-size:.95rem}
 `;
 
 export function layout(L, { title, active, body, flash }) {
@@ -50,6 +61,7 @@ export function layout(L, { title, active, body, flash }) {
     ['orders', '/admin', L.navOrders],
     ['products', '/admin/products', L.navProducts],
     ['customers', '/admin/customers', L.navCustomers],
+    ['stats', '/admin/stats', L.navStats],
   ]
     .map(([key, href, label]) => `<a href="${href}" class="${key === active ? 'on' : ''}">${esc(label)}</a>`)
     .join('');
@@ -260,4 +272,91 @@ ${esc(L.referralCode)} : ${esc(customer.referral_code)} · ${esc(L.lastSeen)} : 
 <h2>${esc(L.history)}</h2><div class="scroll"><table>${rows}</table></div>
 <h2>💬 ${esc(L.conversation)}</h2>${chat(L, messages)}${controls}${refresh ? autoRefresh(15) : ''}`;
   return layout(L, { title: customer.name || customer.phone, active: 'customers', body, flash });
+}
+
+const compact = (locale, n) =>
+  new Intl.NumberFormat(locale === 'en' ? 'en-US' : 'fr-FR', { notation: 'compact', maximumFractionDigits: 1 }).format(n);
+
+/** Round axis ticks: 0, a nice step, ... covering the max. */
+function ticks(max) {
+  if (max <= 0) return [0];
+  const raw = max / 4;
+  const pow = 10 ** Math.floor(Math.log10(raw));
+  const step = [1, 2, 2.5, 5, 10].map((m) => m * pow).find((v) => v >= raw);
+  const out = [];
+  for (let v = 0; v <= max + step * 0.001; v += step) out.push(v);
+  if (out.at(-1) < max) out.push(out.at(-1) + step);
+  return out;
+}
+
+/** Single-series column chart in plain HTML: responsive, crisp text, a per-column hover/focus tooltip. */
+function revenueChart(L, locale, series) {
+  const max = Math.max(...series.map((d) => d.revenue), 0);
+  if (!max) return `<p class="muted">${esc(L.stats.empty)}</p>`;
+  const axis = ticks(max);
+  const top = axis.at(-1);
+  const peak = series.reduce((a, b) => (b.revenue > a.revenue ? b : a));
+  const dateFmt = (day, opts) => new Date(`${day}T12:00:00`).toLocaleDateString(locale === 'en' ? 'en-GB' : 'fr-FR', opts);
+  const labelEvery = Math.ceil(series.length / 6);
+  const grid = axis
+    .map((v) => `<div class="gl" style="bottom:${(v / top) * 100}%"><span>${esc(compact(locale, v))}</span></div>`)
+    .join('');
+  const cols = series
+    .map((d, i) => {
+      const h = (d.revenue / top) * 100;
+      const last = series.length - 1;
+      const showX = i % labelEvery === 0 || i === last;
+      const major = i === 0 || i === last || i === Math.round(last / 2); // the only dates kept on phones
+      return `<div class="col" tabindex="0" data-day="${esc(dateFmt(d.day, { weekday: 'short', day: 'numeric', month: 'short' }))}"
+data-value="${esc(money(locale, d.revenue))}" data-orders="${d.orders}">
+${d === peak ? `<span class="cap" style="bottom:calc(${h}% + 3px)">${esc(compact(locale, d.revenue))}</span>` : ''}<div class="colbar" style="height:${h}%"></div>
+${showX || major ? `<span class="x${major ? '' : ' minor'}">${esc(dateFmt(d.day, { day: 'numeric', month: 'short' }))}</span>` : ''}</div>`;
+    })
+    .join('');
+  const table = series
+    .filter((d) => d.revenue)
+    .map((d) => `<tr><td>${esc(d.day)}</td><td>${d.orders}</td><td>${esc(money(locale, d.revenue))}</td></tr>`)
+    .join('');
+  // Tooltip text is set with textContent (values come from the database).
+  const script = `<script>(function(){var chart=document.currentScript.previousElementSibling,tip=chart.querySelector('.tip');
+function show(col){var b=document.createElement('b');b.textContent=col.dataset.value;tip.replaceChildren(b,document.createTextNode(col.dataset.day+' · '+col.dataset.orders+' ${esc(L.stats.orders.toLowerCase())}'));
+tip.style.display='block';var r=col.getBoundingClientRect(),c=chart.getBoundingClientRect();var x=r.left-c.left+r.width/2-tip.offsetWidth/2;
+tip.style.left=Math.max(-40,Math.min(x,c.width-tip.offsetWidth))+'px';tip.style.top='-8px';}
+chart.querySelectorAll('.col').forEach(function(col){col.addEventListener('pointerenter',function(){show(col)});col.addEventListener('focus',function(){show(col)});
+col.addEventListener('pointerleave',function(){tip.style.display='none'});col.addEventListener('blur',function(){tip.style.display='none'});});})();</script>`;
+  return `<div class="chart" role="img" aria-label="${esc(L.stats.daily)}">${grid}<div class="cols">${cols}</div><div class="tip"></div></div>${script}
+<details><summary class="muted">${esc(L.stats.showTable)}</summary><div class="scroll"><table><tr><th>${esc(L.stats.day)}</th><th>${esc(L.stats.orders)}</th><th>${esc(L.stats.revenue)}</th></tr>${table}</table></div></details>`;
+}
+
+export function statsPage(L, locale, { days, series, stats, products, zones, segments }) {
+  const periods = [7, 30, 90]
+    .map((n) => `<a class="btn${n === days ? ' on' : ''}" href="/admin/stats?days=${n}">${esc(L.stats.last(n))}</a>`)
+    .join('');
+  const from = series[0].day;
+  const to = series.at(-1).day;
+  const basket = stats.orders ? Math.round(stats.revenue / stats.orders) : 0;
+  const repeat = stats.buyers ? Math.round((stats.repeatBuyers / stats.buyers) * 100) : 0;
+  const tile = (value, label, hint) => `<div class="kpi"><b>${esc(value)}</b><span>${esc(label)}${hint ? `<br><small>${esc(hint)}</small>` : ''}</span></div>`;
+  const productRows = products
+    .map((p) => `<tr><td>${esc(p.emoji)} ${esc(locale === 'en' ? p.name_en : p.name_fr)}</td><td>${p.qty}</td><td>${esc(money(locale, p.revenue))}</td></tr>`)
+    .join('');
+  const zoneRows = zones.map((z) => `<tr><td>${esc(z.zone)}</td><td>${z.orders}</td><td>${esc(money(locale, z.revenue))}</td></tr>`).join('');
+  const segmentLine = segments.map((g) => `${esc(L.segments[g.segment] || g.segment)} : <b>${g.n}</b>`).join(' · ');
+  const body = `<h1>📊 ${esc(L.stats.title)}</h1>
+<div class="daynav">${periods}<a class="btn" href="/admin/export.csv?from=${from}&amp;to=${to}">${esc(L.stats.exportCsv)}</a></div>
+<div class="kpis">
+${tile(money(locale, stats.revenue), L.stats.revenue)}
+${tile(String(stats.orders), L.stats.orders)}
+${tile(money(locale, basket), L.stats.basket)}
+${tile(String(stats.newCustomers), L.stats.newCustomers)}
+${tile(`${repeat} %`, L.stats.repeat, L.stats.repeatHint)}
+${tile(stats.ratings ? `${stats.rating.toFixed(1)} / 5` : '–', L.stats.rating, stats.ratings ? L.stats.ratingsCount(stats.ratings) : L.stats.noRating)}
+</div>
+<div class="card" style="margin-top:14px"><b>${esc(L.stats.daily)}</b> <span class="muted">— ${esc(L.stats.dailyHint)}</span>${revenueChart(L, locale, series)}</div>
+<div class="grid" style="margin-top:14px">
+<div><h2>${esc(L.stats.topProducts)}</h2>${products.length ? `<div class="scroll"><table><tr><th></th><th>${esc(L.stats.qty)}</th><th>${esc(L.stats.revenue)}</th></tr>${productRows}</table></div>` : `<p class="muted">${esc(L.stats.empty)}</p>`}</div>
+<div><h2>${esc(L.stats.zones)}</h2>${zones.length ? `<div class="scroll"><table><tr><th></th><th>${esc(L.stats.orders)}</th><th>${esc(L.stats.revenue)}</th></tr>${zoneRows}</table></div>` : `<p class="muted">${esc(L.stats.empty)}</p>`}</div>
+</div>
+${segments.length ? `<h2>${esc(L.stats.segments)}</h2><p>${segmentLine}</p>` : ''}`;
+  return layout(L, { title: L.stats.title, active: 'stats', body });
 }

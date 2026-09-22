@@ -3,6 +3,7 @@ import express from 'express';
 import { config, assertConfig } from './config.js';
 import { logger } from './utils/logger.js';
 import { seedIfEmpty } from './db/seed.js';
+import { db, ping } from './db/index.js';
 import { webhookRouter } from './whatsapp/webhook.js';
 import { adminRouter } from './admin/router.js';
 import { routeRouter } from './admin/route.js';
@@ -28,7 +29,14 @@ app.use(
   }),
 );
 
-app.get('/healthz', (_req, res) => res.json({ ok: true }));
+app.get('/healthz', (_req, res) => {
+  try {
+    res.json({ ok: ping(), uptime: Math.round(process.uptime()) });
+  } catch (err) {
+    logger.error('Health check failed:', err.message);
+    res.status(503).json({ ok: false });
+  }
+});
 app.use(webhookRouter);
 app.use('/admin', adminRouter);
 app.use('/route', routeRouter);
@@ -41,8 +49,24 @@ app.use((err, _req, res, _next) => {
 
 // Only listen when run directly (`node src/index.js`), not when imported by tests.
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  app.listen(config.port, config.host, () => {
+  const server = app.listen(config.port, config.host, () => {
     logger.info(`whatbot listening on http://${config.host}:${config.port} (${config.env})`);
     startScheduler();
   });
+
+  // systemd sends SIGTERM on restart/deploy: finish in-flight requests, then close
+  // the database cleanly (checkpoints the SQLite write-ahead log).
+  const shutdown = (signal) => {
+    logger.info(`${signal} received, shutting down`);
+    server.close(() => {
+      db.close();
+      process.exit(0);
+    });
+    setTimeout(() => {
+      db.close();
+      process.exit(0);
+    }, 5000).unref();
+  };
+  process.once('SIGTERM', () => shutdown('SIGTERM'));
+  process.once('SIGINT', () => shutdown('SIGINT'));
 }

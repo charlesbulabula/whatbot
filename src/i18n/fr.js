@@ -47,6 +47,10 @@ export default {
   invalidQty: 'Indiquez un nombre entre 1 et 20.',
   added: (p) => `✅ Ajouté : ${p.item}`,
 
+  nluUnderstood: 'J’ai compris :',
+  nluConfirm: 'C’est correct ?',
+  nluUnknown: (p) => `Je n’ai pas trouvé dans notre catalogue : ${p.items}.`,
+  btnNluChoose: '✏️ Je choisis',
   cartTitle: '🧺 *Votre panier*',
   subtotalLine: (p) => `Sous-total : *${p.amount}*`,
   addMorePrompt: 'Voulez-vous ajouter autre chose ?',
@@ -66,11 +70,13 @@ export default {
   askName: 'À quel nom faut-il livrer la commande ?',
   askNameKeep: 'Touchez le bouton pour garder ce nom, ou écrivez-en un autre.',
   invalidName: 'Merci d’écrire un nom (2 à 60 caractères).',
-  askZone: 'Dans quel quartier faut-il livrer ?',
+  askZone: 'Dans quel quartier faut-il livrer ?\nVous pouvez aussi partager votre position 📍',
   zoneButton: 'Quartiers',
   zoneOther: 'Autre quartier',
   zoneNotServed: (p) =>
     `Désolé, nous ne livrons pas encore ${p.zone ? `à *${p.zone}*` : 'dans ce quartier'} 🙏\nZones desservies : ${p.zones}.`,
+  zoneDetected: (p) => `📍 Position reçue : *${p.zone}*.`,
+  zoneNotDetected: 'Je n’ai pas reconnu le quartier de cette position 🙏 Choisissez-le dans la liste.',
   askAddress:
     'Précisez l’adresse : avenue, numéro et un point de repère.\nVous pouvez aussi partager votre position 📍',
   btnSameAddress: '🏠 Même adresse',
@@ -95,7 +101,7 @@ export default {
     (p.holder ? `Au nom de : ${p.holder}\n` : '') +
     `Motif : ${p.ref}\n\n` +
     `Ensuite, envoyez-moi ici la *capture d’écran* du paiement 📸`,
-  awaitingProof: 'J’attends la capture d’écran de votre paiement 📸\nTapez *annuler* pour annuler la commande.',
+  awaitingProof: 'J’attends la capture d’écran de votre paiement 📸\nTapez *menu* pour revenir au menu (la commande reste en attente) ou *annuler* pour l’annuler.',
   proofReceived: (p) =>
     `📸 Capture reçue, merci ! Nous vérifions le paiement de la commande *${p.ref}* et vous confirmons très vite.`,
   paidByCredit: (p) => `🎉 Commande *${p.ref}* entièrement payée avec votre crédit. Nous la préparons !`,

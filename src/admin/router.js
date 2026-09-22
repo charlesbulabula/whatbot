@@ -22,15 +22,45 @@ const sameSecret = (a, b) => {
   return crypto.timingSafeEqual(ha, hb);
 };
 
+// Brute-force guard: after too many wrong passwords from one IP, refuse for a while.
+const FAILURE_LIMIT = 10;
+const FAILURE_WINDOW_MS = 15 * 60 * 1000;
+const failures = new Map(); // ip -> { count, since }
+
+function tooManyFailures(ip) {
+  const entry = failures.get(ip);
+  if (!entry) return false;
+  if (Date.now() - entry.since > FAILURE_WINDOW_MS) {
+    failures.delete(ip);
+    return false;
+  }
+  return entry.count >= FAILURE_LIMIT;
+}
+
+function recordFailure(ip) {
+  const entry = failures.get(ip);
+  if (!entry || Date.now() - entry.since > FAILURE_WINDOW_MS) failures.set(ip, { count: 1, since: Date.now() });
+  else entry.count += 1;
+  if (failures.size > 10_000) failures.clear(); // bounded memory under a distributed attack
+}
+
 adminRouter.use((req, res, next) => {
   if (!config.admin.password) return res.status(503).type('text/plain').send('Admin disabled: set ADMIN_PASSWORD in .env');
+  if (tooManyFailures(req.ip)) {
+    return res.status(429).set('Retry-After', String(FAILURE_WINDOW_MS / 1000)).send('Too many failed attempts, try again later');
+  }
   const [scheme, encoded] = String(req.get('authorization') || '').split(' ');
   if (scheme === 'Basic' && encoded) {
     const decoded = Buffer.from(encoded, 'base64').toString('utf8');
     const sep = decoded.indexOf(':');
     const user = decoded.slice(0, sep);
     const pass = decoded.slice(sep + 1);
-    if (sep > 0 && sameSecret(user, config.admin.user) && sameSecret(pass, config.admin.password)) return next();
+    if (sep > 0 && sameSecret(user, config.admin.user) && sameSecret(pass, config.admin.password)) {
+      failures.delete(req.ip);
+      return next();
+    }
+    recordFailure(req.ip);
+    logger.warn(`Failed dashboard login from ${req.ip}`);
   }
   res.set('WWW-Authenticate', 'Basic realm="whatbot admin", charset="UTF-8"').status(401).send('Authentication required');
 });
@@ -280,4 +310,54 @@ adminRouter.get('/route', (req, res) => {
 <div class="actions"><a class="btn" style="background:var(--accent);color:var(--accent-ink)" href="https://wa.me/?text=${encodeURIComponent(shareText)}" target="_blank" rel="noopener noreferrer">${views.esc(L.route.sendWhatsApp)}</a></div></div>
 <h2>${views.esc(L.route.toDeliver)} (${pending.length})</h2>${pending.length ? `<div class="grid">${riderCards(L, pending)}</div>` : `<p class="muted">${views.esc(L.route.empty)}</p>`}`;
   res.send(views.layout(L, { title: L.route.title, active: 'orders', body }));
+});
+
+/* --------------------------------- stats ------------------------------- */
+
+adminRouter.get('/stats', (req, res) => {
+  const { L, locale } = res.locals;
+  const days = [7, 30, 90].includes(Number(req.query.days)) ? Number(req.query.days) : 30;
+  res.send(
+    views.statsPage(L, locale, {
+      days,
+      series: db.dailyRevenue(days),
+      stats: db.periodStats(days),
+      products: db.topProducts(days),
+      zones: db.zoneStats(days),
+      segments: db.segmentCounts(),
+    }),
+  );
+});
+
+// Semicolon-separated with a BOM so Excel (French locale) opens it directly.
+adminRouter.get('/export.csv', (req, res) => {
+  const to = isDay(req.query.to) ? req.query.to : localDay();
+  const from = isDay(req.query.from) ? req.query.from : shiftDay(to, -29);
+  const cell = (v) => {
+    const s = String(v ?? '');
+    return /[;"\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  const header = ['reference', 'date', 'status', 'customer', 'phone', 'area', 'address', 'items', 'subtotal', 'delivery_fee', 'credit_used', 'total', 'paid_at', 'delivered_at', 'rating'];
+  const rows = db.ordersBetween(from, to).map((o) => [
+    o.reference,
+    new Date(`${o.created_at.replace(' ', 'T')}Z`).toLocaleString('sv-SE'),
+    o.status,
+    o.customer_name,
+    `+${o.customer.phone}`,
+    o.neighborhood,
+    o.address_note,
+    o.items.map((it) => `${res.locals.locale === 'en' ? it.name_en : it.name_fr} ${res.locals.L.sizes[it.size]} x${it.quantity}`).join(', '),
+    o.subtotal,
+    o.delivery_fee,
+    o.discount,
+    o.total,
+    o.paid_at,
+    o.delivered_at,
+    o.rating,
+  ]);
+  const csv = [header, ...rows].map((r) => r.map(cell).join(';')).join('\r\n');
+  res
+    .set('Content-Type', 'text/csv; charset=utf-8')
+    .set('Content-Disposition', `attachment; filename="commandes-${from}-${to}.csv"`)
+    .send(`\uFEFF${csv}\r\n`);
 });

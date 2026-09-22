@@ -199,9 +199,14 @@ export function idleConversations(states, olderThanMinutes, { reminded } = {}) {
 
 export function createOrder({ customer, items, subtotal, deliveryFee, discount, total, name, neighborhood, addressNote }) {
   const tx = db.transaction(() => {
+    // Next number after the highest reference already issued today: unique by construction,
+    // even if the server clock or timezone changes.
     const day = db.prepare(`SELECT strftime('%Y%m%d', 'now', 'localtime') AS d`).get().d;
-    const seq = db.prepare(`SELECT COUNT(*) AS n FROM orders WHERE ${LOCAL_DAY} = ${TODAY}`).get().n + 1;
-    const reference = `CMD-${day}-${String(seq).padStart(3, '0')}`;
+    const prefix = `CMD-${day}-`;
+    const last = db
+      .prepare(`SELECT MAX(CAST(substr(reference, ?) AS INTEGER)) AS n FROM orders WHERE reference LIKE ?`)
+      .get(prefix.length + 1, `${prefix}%`).n;
+    const reference = `${prefix}${String((last || 0) + 1).padStart(3, '0')}`;
     const info = db
       .prepare(
         `INSERT INTO orders (reference, customer_id, subtotal, delivery_fee, discount, total, customer_name, neighborhood, address_note)
@@ -453,4 +458,86 @@ export function setSetting(key, value) {
     key,
     String(value),
   );
+}
+
+/* -------------------------------- stats -------------------------------- */
+
+const periodStart = (days) => `-${Math.max(1, days) - 1} days`; // today counts as day 1
+
+/** Paid revenue and order count per local day over the last `days` days (days without sales included). */
+export function dailyRevenue(days) {
+  const rows = db
+    .prepare(
+      `SELECT date(created_at, 'localtime') AS day, SUM(total) AS revenue, COUNT(*) AS orders
+         FROM orders
+        WHERE status IN (${PAID_SQL}) AND created_at >= datetime('now', 'localtime', 'start of day', ?, 'utc')
+        GROUP BY day`,
+    )
+    .all(periodStart(days));
+  const byDay = new Map(rows.map((r) => [r.day, r]));
+  const out = [];
+  for (let i = days - 1; i >= 0; i--) {
+    const d = new Date();
+    d.setDate(d.getDate() - i);
+    const day = d.toLocaleDateString('en-CA');
+    out.push({ day, revenue: byDay.get(day)?.revenue ?? 0, orders: byDay.get(day)?.orders ?? 0 });
+  }
+  return out;
+}
+
+export function periodStats(days) {
+  const since = periodStart(days);
+  const sales = db
+    .prepare(
+      `SELECT COUNT(*) AS orders, COALESCE(SUM(total), 0) AS revenue, COUNT(DISTINCT customer_id) AS buyers,
+              AVG(rating) AS rating, COUNT(rating) AS ratings
+         FROM orders
+        WHERE status IN (${PAID_SQL}) AND created_at >= datetime('now', 'localtime', 'start of day', ?, 'utc')`,
+    )
+    .get(since);
+  const repeat = db
+    .prepare(
+      `SELECT COUNT(DISTINCT o.customer_id) AS n FROM orders o JOIN customers c ON c.id = o.customer_id
+        WHERE o.status IN (${PAID_SQL}) AND c.orders_count >= 2
+          AND o.created_at >= datetime('now', 'localtime', 'start of day', ?, 'utc')`,
+    )
+    .get(since).n;
+  const newCustomers = db
+    .prepare(`SELECT COUNT(*) AS n FROM customers WHERE created_at >= datetime('now', 'localtime', 'start of day', ?, 'utc')`)
+    .get(since).n;
+  return { ...sales, repeatBuyers: repeat, newCustomers };
+}
+
+export function topProducts(days) {
+  return db
+    .prepare(
+      `SELECT p.id, p.name_fr, p.name_en, p.emoji, SUM(oi.quantity) AS qty, SUM(oi.line_total) AS revenue
+         FROM order_items oi JOIN orders o ON o.id = oi.order_id JOIN products p ON p.id = oi.product_id
+        WHERE o.status IN (${PAID_SQL}) AND o.created_at >= datetime('now', 'localtime', 'start of day', ?, 'utc')
+        GROUP BY p.id ORDER BY revenue DESC`,
+    )
+    .all(periodStart(days));
+}
+
+export function zoneStats(days) {
+  return db
+    .prepare(
+      `SELECT COALESCE(neighborhood, '—') AS zone, COUNT(*) AS orders, SUM(total) AS revenue
+         FROM orders
+        WHERE status IN (${PAID_SQL}) AND created_at >= datetime('now', 'localtime', 'start of day', ?, 'utc')
+        GROUP BY zone ORDER BY revenue DESC`,
+    )
+    .all(periodStart(days));
+}
+
+export function segmentCounts() {
+  return db.prepare('SELECT segment, COUNT(*) AS n FROM customers WHERE orders_count > 0 GROUP BY segment').all();
+}
+
+/** Orders created between two local days (inclusive), with items, for the CSV export. */
+export function ordersBetween(fromDay, toDay) {
+  return db
+    .prepare(`SELECT id FROM orders WHERE date(created_at, 'localtime') BETWEEN ? AND ? ORDER BY created_at`)
+    .all(fromDay, toDay)
+    .map((r) => getOrder(r.id));
 }

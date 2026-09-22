@@ -58,3 +58,11 @@ test('order references are sequential per day', () => {
   const n = (ref) => Number(ref.split('-').at(-1));
   assert.equal(n(b.reference), n(a.reference) + 1);
 });
+
+test('order references stay unique even when earlier orders were re-dated', () => {
+  const a = db.getOrder(placeOrder(customer('243820000006')));
+  db.db.prepare("UPDATE orders SET created_at = datetime('now', '-3 days') WHERE id = ?").run(a.id);
+  const b = db.getOrder(placeOrder(customer('243820000007')));
+  assert.ok(b, 'second order was created');
+  assert.notEqual(b.reference, a.reference);
+});

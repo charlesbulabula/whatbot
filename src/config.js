@@ -63,6 +63,19 @@ export const config = {
     available: list(process.env.AVAILABLE_LOCALES, ['fr', 'en']),
   },
 
+  ai: {
+    // Optional: understand free-text orders with Claude. Empty key = feature off.
+    apiKey: process.env.ANTHROPIC_API_KEY || '',
+    model: process.env.ANTHROPIC_MODEL || 'claude-opus-5',
+    timeoutMs: int(process.env.ANTHROPIC_TIMEOUT_MS, 15000),
+    dailyLimitPerCustomer: int(process.env.AI_DAILY_LIMIT_PER_CUSTOMER, 30),
+  },
+
+  geo: {
+    // Reverse-geocode shared locations with OpenStreetMap Nominatim to detect the delivery zone.
+    enabled: bool(process.env.GEOCODING_ENABLED, true) && process.env.NODE_ENV !== 'test',
+  },
+
   admin: {
     user: process.env.ADMIN_USER || 'admin',
     password: process.env.ADMIN_PASSWORD || '',

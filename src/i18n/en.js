@@ -46,6 +46,10 @@ export default {
   invalidQty: 'Please give a number between 1 and 20.',
   added: (p) => `✅ Added: ${p.item}`,
 
+  nluUnderstood: 'Here is what I understood:',
+  nluConfirm: 'Is that right?',
+  nluUnknown: (p) => `Not in our catalogue: ${p.items}.`,
+  btnNluChoose: '✏️ I will choose',
   cartTitle: '🧺 *Your cart*',
   subtotalLine: (p) => `Subtotal: *${p.amount}*`,
   addMorePrompt: 'Would you like anything else?',
@@ -65,11 +69,13 @@ export default {
   askName: 'Whose name should the order be delivered to?',
   askNameKeep: 'Tap the button to keep this name, or type another one.',
   invalidName: 'Please type a name (2 to 60 characters).',
-  askZone: 'Which area should we deliver to?',
+  askZone: 'Which area should we deliver to?\nYou can also share your location 📍',
   zoneButton: 'Areas',
   zoneOther: 'Other area',
   zoneNotServed: (p) =>
     `Sorry, we do not deliver ${p.zone ? `to *${p.zone}*` : 'to that area'} yet 🙏\nAreas we serve: ${p.zones}.`,
+  zoneDetected: (p) => `📍 Location received: *${p.zone}*.`,
+  zoneNotDetected: 'I could not recognise the area of this location 🙏 Please pick it from the list.',
   askAddress: 'Please give the address: street, number and a landmark.\nYou can also share your location 📍',
   btnSameAddress: '🏠 Same address',
   invalidAddress: 'Please give an address (at least 3 characters) or share your location.',
@@ -93,7 +99,7 @@ export default {
     (p.holder ? `Account name: ${p.holder}\n` : '') +
     `Reference: ${p.ref}\n\n` +
     `Then send me the payment *screenshot* here 📸`,
-  awaitingProof: 'I am waiting for your payment screenshot 📸\nType *cancel* to cancel the order.',
+  awaitingProof: 'I am waiting for your payment screenshot 📸\nType *menu* to go back to the menu (the order stays pending) or *cancel* to cancel it.',
   proofReceived: (p) =>
     `📸 Screenshot received, thank you! We are checking the payment for order *${p.ref}* and will confirm shortly.`,
   paidByCredit: (p) => `🎉 Order *${p.ref}* is fully paid with your credit. We are preparing it!`,

@@ -341,3 +341,14 @@ test('"agent" pauses the bot until "menu"; the shop is alerted', () => {
   assert.deepEqual(optionIds(back).slice(0, 1), ['menu:order']);
   assert.equal(c.state(), 'MENU');
 });
+
+test('a menu button tapped while a payment is pending lets the customer move on', () => {
+  const c = customer('243810000021');
+  const orderId = placeOrder(c);
+  assert.equal(c.state(), 'AWAIT_PROOF');
+  const dup = c.tap('menu:order').last;
+  assert.match(dup.body, /déjà une commande aujourd’hui/);
+  assert.equal(db.getOrder(orderId).status, 'awaiting_payment');
+  c.image('later-proof');
+  assert.equal(db.getOrder(orderId).payment_proof, 'later-proof');
+});

@@ -4,6 +4,7 @@ import { logger } from '../utils/logger.js';
 import { enqueue } from '../utils/queue.js';
 import { markEventProcessed } from '../db/index.js';
 import { handleInbound } from '../bot/engine.js';
+import { enrichInbound } from '../bot/enrich.js';
 import { isValidSignature } from './signature.js';
 import { send, markRead } from './client.js';
 
@@ -15,6 +16,13 @@ export function extractMessages(body) {
       const value = change.value || {};
       const ownNumber = config.whatsapp.phoneNumberId;
       if (ownNumber && value.metadata?.phone_number_id && value.metadata.phone_number_id !== ownNumber) continue;
+      for (const status of value.statuses || []) {
+        // Messages Meta accepted but could not deliver (e.g. 131047: 24h window closed).
+        if (status.status === 'failed') {
+          const e = status.errors?.[0] || {};
+          logger.warn(`Delivery to ${status.recipient_id} failed: ${e.code ?? '?'} ${e.title ?? ''} ${e.error_data?.details ?? ''}`.trim());
+        }
+      }
       const names = Object.fromEntries((value.contacts || []).map((c) => [c.wa_id, c.profile?.name]));
       for (const m of value.messages || []) out.push(normalizeInbound(m, names[m.from]));
     }
@@ -57,7 +65,7 @@ export function normalizeInbound(m, profileName) {
 export async function processInbound(msg) {
   if (!markEventProcessed(msg.id)) return; // Meta redelivers events; handle each once
   markRead(msg.id);
-  const { messages, tasks } = handleInbound(msg);
+  const { messages, tasks } = handleInbound(await enrichInbound(msg));
   for (const out of messages) {
     try {
       await send(out);

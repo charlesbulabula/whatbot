@@ -25,10 +25,22 @@ ou mot « english »). Le tableau de bord admin suit la même règle (lien « En
 | §5.7 | Segments automatiques : nouveau / régulier (2+) / VIP (6+) |
 | §6 | Parrainage (code envoyé après la 2ᵉ commande, crédit pour les deux), carte de fidélité (crédit toutes les N commandes), liste d'attente quand le stock hebdo est plein, sondage 1-5 ⭐ 24 h après livraison, zones de livraison vérifiées, prévision d'achat sur 4 semaines, partage de position GPS comme adresse |
 
+### Fonctions avancées
+
+| Fonction | Ce que ça fait |
+|---|---|
+| **Commande en texte libre** (optionnel) | « 2 tas moyens de tomates et un petit gingembre » → le bot répond « J'ai compris : … C'est correct ? ». Utilise Claude (`ANTHROPIC_API_KEY`) ; sans clé, seuls les boutons sont proposés. Limite de 30 phrases analysées par client et par jour. |
+| **Position GPS → quartier** | Le client partage sa position : le bot reconnaît la commune (OpenStreetMap, gratuit), vérifie qu'elle est desservie et saute les questions quartier + adresse. |
+| **Parler à une personne** | Le client tape « agent » : le bot se tait, tu es alerté, tu réponds depuis la fiche client du tableau de bord (photos et vocaux lisibles). « Rendre la main au bot » quand c'est fini. |
+| **Feuille de route du livreur** | Un lien secret par jour (sans mot de passe admin) à envoyer au livreur sur WhatsApp : ses livraisons avec appel, WhatsApp, itinéraire ; il marque « Je pars » et « Livrée », le client est prévenu. Le lien expire après 2 jours. |
+| **Statistiques** | Chiffre d'affaires par jour, panier moyen, clients fidèles, note moyenne, produits et quartiers, sur 7, 30 ou 90 jours. |
+| **Export CSV** | Toutes les commandes d'une période, lisible directement dans Excel. |
+| **Robustesse** | Captures de paiement copiées sur le serveur (les liens Meta expirent), sauvegarde quotidienne de la base (14 jours), migration automatique de la base à chaque mise à jour, blocage après 10 mauvais mots de passe admin, arrêt propre lors des redéploiements. |
+
 **Pas encore fait (phase 2 prévue dans l'architecture) :** vérification automatique du
 paiement via les API Orange Money / Airtel Money (aujourd'hui : capture d'écran vérifiée
 à la main dans l'admin), et transcription des messages vocaux (le bot demande poliment
-d'utiliser les boutons).
+d'utiliser les boutons, sauf pendant une prise en main humaine).
 
 ## Mise en ligne
 
@@ -43,7 +55,28 @@ Chez LWS : Espace client → domaine **ll-aca.site** → **Zone DNS** → Ajoute
 Ne modifie **pas** l'enregistrement `@` existant : il sert ton site et ta messagerie LWS.
 Le sous-domaine est prêt en général en quelques minutes (parfois jusqu'à une heure).
 
-### 2. Déployer depuis ton Mac
+### 2. Déployer
+
+#### Option A — automatiquement par GitHub (recommandé, aucun terminal)
+
+Chaque `push` sur la branche par défaut lance les tests, puis déploie s'ils passent.
+Il suffit d'enregistrer les réglages comme **secrets** du repo, une seule fois :
+https://github.com/charlesbulabula/whatbot/settings/secrets/actions/new
+
+| Secret | Valeur |
+|---|---|
+| `VPS_PASSWORD` | mot de passe root du VPS (obligatoire pour déployer) |
+| `ADMIN_PASSWORD` | mot de passe du tableau de bord |
+| `WA_VERIFY_TOKEN` | un mot de ton choix, à recopier dans Meta |
+| `WA_PHONE_NUMBER_ID`, `WA_TOKEN`, `WA_APP_SECRET`, `WA_BUSINESS_NUMBER` | fournis par Meta (étape 3) |
+| `MOMO_ORANGE`, `MOMO_AIRTEL`, `MOMO_HOLDER`, `ADMIN_NOTIFY_NUMBER` | réglages de la boutique |
+| `ANTHROPIC_API_KEY` | facultatif : commandes en texte libre |
+
+Pour redéployer sans modifier le code (par exemple après avoir ajouté un secret) :
+onglet **Actions** → *Test & deploy* → **Run workflow**. Le repo étant public, ses logs
+le sont aussi : le script n'y affiche jamais la valeur d'un secret, seulement ✔ / ✘.
+
+#### Option B — depuis ton Mac
 
 ```bash
 cd ~/whatbot
@@ -78,7 +111,7 @@ Autre domaine ou autre port : `DOMAIN=autre.exemple.com PORT=3030 ./deploy/deplo
    Ajouter (admin) → Attribuer les ressources (l'app + le compte WhatsApp) → Générer un jeton
    avec `whatsapp_business_messaging` et `whatsapp_business_management`, expiration **Jamais**.
 5. **App secret** : Paramètres de l'app → Général → Clé secrète.
-6. Renseigne le serveur :
+6. Renseigne ces valeurs : en secrets GitHub puis *Run workflow* (option A), ou sur le serveur (option B) :
 
    ```bash
    ssh root@72.62.238.174
@@ -126,6 +159,11 @@ Coût indicatif (architecture §3.1) : ~0,004-0,005 $ par message utilitaire hor
 - **Alerte admin** : mets ton numéro perso dans `ADMIN_NOTIFY_NUMBER` pour recevoir chaque
   capture de paiement. Écris « Bonjour » au bot une fois par jour depuis ce numéro pour
   garder la fenêtre de 24 h ouverte, ou crée le modèle `admin_alert`.
+- **Statistiques** et **export CSV** : onglet *Statistiques* du tableau de bord.
+- **Livreur** : bouton « 🛵 Feuille de route du livreur » sur le tableau de bord → « Envoyer au livreur par WhatsApp ».
+- **Coût de la commande en texte libre** : environ 1 centime de dollar par phrase analysée avec
+  le modèle par défaut (`ANTHROPIC_MODEL=claude-opus-5`). Un modèle plus léger coûte moins
+  cher, au prix d'une compréhension moins fine : à toi de choisir.
 - **Capacité** : `WEEKLY_STOCK_CAPACITY=40` bascule les nouvelles commandes en liste d'attente
   au-delà de 40 commandes sur 7 jours ; les clients en attente sont prévenus dès qu'une place se libère.
 
@@ -142,7 +180,7 @@ ssh root@72.62.238.174 'ls /opt/whatbot/data/backups'     # sauvegarde quotidien
 ```bash
 npm install
 cp .env.example .env        # WA_ENABLED=false pour ne rien envoyer à Meta
-npm test                    # parcours client complets, webhook signé, admin, tâches planifiées
+npm test                    # 50 tests : parcours client, webhook signé, admin, livreur, IA, migrations…
 npm run dev                 # http://127.0.0.1:3023/admin
 ```
 
@@ -155,10 +193,13 @@ src/
   bot/messages.js      boutons / listes / texte selon les limites WhatsApp
   i18n/fr.js, en.js    textes du bot (mêmes clés, vérifié par les tests)
   whatsapp/            webhook Meta, signature HMAC, client Graph API
-  admin/               tableau de bord (FR/EN)
+  admin/               tableau de bord (FR/EN), feuille de route du livreur, statistiques
+  ai/                  commande en texte libre (Claude, optionnel)
+  geo/                 position GPS → quartier (OpenStreetMap)
   jobs/scheduler.js    relances, sondages, rappel hebdo, liste d'attente
   db/                  schéma SQLite, requêtes, catalogue de départ, sauvegarde
 deploy/                script de déploiement, service systemd, vhost Nginx, cron de sauvegarde
+.github/workflows/     tests + déploiement automatique
 ```
 
 Écart assumé avec l'architecture : le processus est géré par **systemd** plutôt que PM2.

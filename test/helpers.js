@@ -19,10 +19,13 @@ export function customer(phone) {
   return {
     phone,
     say: (text) => send({ type: 'text', text }),
+    // `nlu` stands for what Claude understood from the sentence (see src/bot/enrich.js).
+    sayUnderstood: (text, nlu) => send({ type: 'text', text, nlu }),
     tap: (replyId, title = replyId) => send({ type: 'interactive', replyId, text: title }),
     image: (mediaId = 'media-1') => send({ type: 'image', mediaId }),
     voice: () => send({ type: 'audio', mediaId: 'voice-1' }),
-    location: (latitude, longitude) => send({ type: 'location', location: { latitude, longitude } }),
+    // `geo` stands for what reverse geocoding found (see src/bot/enrich.js).
+    location: (latitude, longitude, geo) => send({ type: 'location', location: { latitude, longitude }, geo }),
     state: () => db.prepare('SELECT state FROM conversations WHERE phone = ?').get(phone)?.state,
   };
 }
