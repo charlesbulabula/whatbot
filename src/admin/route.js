@@ -31,9 +31,8 @@ export function routeUrl(day) {
 }
 
 function validLink(day, token) {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(day) || typeof token !== 'string' || token.length !== 32) return false;
-  const expected = Buffer.from(routeToken(day));
-  if (!crypto.timingSafeEqual(expected, Buffer.from(token.padEnd(32).slice(0, 32)))) return false;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day) || !/^[0-9a-f]{32}$/.test(String(token))) return false;
+  if (!crypto.timingSafeEqual(Buffer.from(routeToken(day)), Buffer.from(token))) return false;
   const ageDays = (Date.now() - new Date(`${day}T00:00:00`).getTime()) / 864e5;
   return ageDays <= MAX_AGE_DAYS + 1 && ageDays >= -1;
 }
@@ -116,7 +115,13 @@ routeRouter.post('/:day/:token/orders/:id', async (req, res) => {
   const { day, token } = req.params;
   if (!validLink(day, token)) return res.status(404).send(esc(L.route.expired));
   const origin = req.get('origin');
-  if (origin && new URL(origin).host !== req.get('host')) return res.status(403).send('Cross-site request refused');
+  let sameSite = true;
+  try {
+    sameSite = !origin || new URL(origin).host === req.get('host');
+  } catch {
+    sameSite = false;
+  }
+  if (!sameSite) return res.status(403).send('Cross-site request refused');
 
   const status = req.body.status;
   const order = db.getOrder(Number(req.params.id));

@@ -142,6 +142,7 @@ test('rider route sheet: secret per-day link, rider marks an order delivered, fo
   const forged = link.replace(/[0-9a-f]{4}$/, '0000');
   assert.equal((await fetch(`${base}${forged}`)).status, 404);
   assert.equal((await fetch(`${base}/route/2020-01-01/${'a'.repeat(32)}`)).status, 404);
+  assert.equal((await fetch(`${base}${link.slice(0, -2)}é`)).status, 404, 'non-hex characters are a 404, not a crash');
 
   const done = await fetch(`${base}${link}/orders/${order.id}`, {
     method: 'POST',
