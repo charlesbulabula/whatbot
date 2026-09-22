@@ -1,0 +1,22 @@
+# Nginx vhost for the bot. Purely additive: other sites on the VPS are untouched.
+# __DOMAIN__ and __PORT__ are filled in by deploy/deploy.sh; certbot then adds HTTPS.
+server {
+    listen 80;
+    listen [::]:80;
+    server_name __DOMAIN__;
+
+    access_log /var/log/nginx/whatbot.access.log;
+    error_log  /var/log/nginx/whatbot.error.log;
+
+    client_max_body_size 2m;
+
+    location / {
+        proxy_pass http://127.0.0.1:__PORT__;
+        proxy_http_version 1.1;
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 30s;
+    }
+}

@@ -1,0 +1,3 @@
+# Daily backup of the WhatsApp bot database at 03:15, 14 days kept in /opt/whatbot/data/backups.
+# Installed by deploy/deploy.sh.
+15 3 * * * whatbot cd /opt/whatbot && /usr/bin/env node src/db/backup.js >> /opt/whatbot/data/backup.log 2>&1

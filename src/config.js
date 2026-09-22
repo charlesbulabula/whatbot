@@ -1,5 +1,7 @@
-import 'dotenv/config';
+import dotenv from 'dotenv';
 import path from 'node:path';
+
+dotenv.config({ quiet: true });
 
 const bool = (v, fallback = false) =>
   v === undefined ? fallback : ['1', 'true', 'yes', 'on'].includes(String(v).toLowerCase());
@@ -10,7 +12,10 @@ const list = (v, fallback = []) =>
 export const config = {
   env: process.env.NODE_ENV || 'development',
   port: int(process.env.PORT, 3000),
-  dbPath: path.resolve(process.env.DB_PATH || './data/whatbot.db'),
+  host: process.env.HOST || '127.0.0.1',
+  publicUrl: (process.env.PUBLIC_URL || '').replace(/\/$/, ''),
+  dbPath:
+    process.env.DB_PATH === ':memory:' ? ':memory:' : path.resolve(process.env.DB_PATH || './data/whatbot.db'),
 
   whatsapp: {
     phoneNumberId: process.env.WA_PHONE_NUMBER_ID || '',
@@ -18,8 +23,22 @@ export const config = {
     verifyToken: process.env.WA_VERIFY_TOKEN || '',
     appSecret: process.env.WA_APP_SECRET || '',
     graphVersion: process.env.WA_GRAPH_VERSION || 'v21.0',
+    businessNumber: (process.env.WA_BUSINESS_NUMBER || '').replace(/\D/g, ''),
     // When false the client only logs outbound payloads (useful for local dev and tests).
     enabled: bool(process.env.WA_ENABLED, true),
+    // Approved message templates, used when the 24h customer-service window is closed.
+    // Leave a name empty to skip that notification outside the window.
+    templates: {
+      orderUpdate: process.env.WA_TEMPLATE_ORDER_UPDATE || '',
+      weeklyReminder: process.env.WA_TEMPLATE_WEEKLY_REMINDER || '',
+      survey: process.env.WA_TEMPLATE_SURVEY || '',
+      waitlistOpen: process.env.WA_TEMPLATE_WAITLIST_OPEN || '',
+      adminAlert: process.env.WA_TEMPLATE_ADMIN_ALERT || '',
+    },
+    templateLanguages: {
+      fr: process.env.WA_TEMPLATE_LANG_FR || 'fr',
+      en: process.env.WA_TEMPLATE_LANG_EN || 'en',
+    },
   },
 
   shop: {
@@ -30,7 +49,13 @@ export const config = {
     momoOrange: process.env.MOMO_ORANGE || '',
     momoAirtel: process.env.MOMO_AIRTEL || '',
     momoHolder: process.env.MOMO_HOLDER || '',
-    adminNotifyNumber: process.env.ADMIN_NOTIFY_NUMBER || '',
+    adminNotifyNumber: (process.env.ADMIN_NOTIFY_NUMBER || '').replace(/\D/g, ''),
+  },
+
+  loyalty: {
+    referralReward: int(process.env.REFERRAL_REWARD, 1000),
+    every: int(process.env.LOYALTY_EVERY, 5),
+    reward: int(process.env.LOYALTY_REWARD, 2000),
   },
 
   i18n: {
@@ -51,7 +76,10 @@ export const config = {
   },
 };
 
-/** Fail fast in production when something required is missing. */
+/**
+ * Lists missing settings. The app still starts without WhatsApp credentials so the
+ * dashboard works on a fresh install; the webhook refuses traffic until they are set.
+ */
 export function assertConfig() {
   const missing = [];
   if (config.whatsapp.enabled) {
@@ -61,8 +89,5 @@ export function assertConfig() {
     if (!config.whatsapp.appSecret) missing.push('WA_APP_SECRET');
   }
   if (!config.admin.password) missing.push('ADMIN_PASSWORD');
-  if (missing.length && config.env === 'production') {
-    throw new Error(`Missing required environment variables: ${missing.join(', ')}`);
-  }
   return missing;
 }

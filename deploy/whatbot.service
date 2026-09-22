@@ -1,0 +1,26 @@
+# systemd unit for the WhatsApp bot, alongside the other services on the VPS.
+# Installed by deploy/deploy.sh; do not edit on the server.
+[Unit]
+Description=whatbot - WhatsApp ordering bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=whatbot
+Group=whatbot
+WorkingDirectory=/opt/whatbot
+Environment=NODE_ENV=production
+Environment=TZ=Africa/Kinshasa
+ExecStart=/usr/bin/env node src/index.js
+Restart=always
+RestartSec=3
+# Hardening: the app only needs to write its SQLite database.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/whatbot/data
+
+[Install]
+WantedBy=multi-user.target
