@@ -1,0 +1,33 @@
+# Manual health report of the production bot. Logs of this public repo are public:
+# every number of 6+ digits (phone numbers, ids) is masked before printing.
+name: Diagnose
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install sshpass
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq sshpass
+      - name: Server report
+        env:
+          VPS: root@${{ secrets.VPS_HOST || '72.62.238.174' }}
+          SSHPASS: ${{ secrets.VPS_PASSWORD }}
+        run: |
+          sshpass -e ssh -o StrictHostKeyChecking=accept-new -o PubkeyAuthentication=no "$VPS" bash -s <<'REMOTE' | sed -E 's/[0-9]{6,}/[num]/g; s/(EAA|sha256=)[A-Za-z0-9]+/\1[redacted]/g'
+          echo "== service"; systemctl is-active whatbot
+          echo "== recent log"; journalctl -u whatbot -n 60 --no-pager -o cat
+          echo "== nginx webhook hits (last 20)"; grep -h '/webhook' /var/log/nginx/whatbot.access.log 2>/dev/null | tail -20 | awk '{print $4, $6, $7, $9}'
+          echo "== database"
+          cd /opt/whatbot && node -e "
+            const D=require('better-sqlite3'); const db=new D('data/whatbot.db',{readonly:true});
+            console.log('messages in :', db.prepare(\"select count(*) n from messages where direction='in'\").get().n);
+            console.log('messages out:', db.prepare(\"select count(*) n from messages where direction='out'\").get().n);
+            console.log('last in     :', db.prepare(\"select created_at from messages where direction='in' order by id desc limit 1\").get()?.created_at);
+          "
+          REMOTE
