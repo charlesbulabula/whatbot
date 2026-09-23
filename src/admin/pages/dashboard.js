@@ -95,7 +95,7 @@ export function quantitiesTable(L, locale, rows, valueKey, emptyLabel) {
 export function dashboardPage(L, locale, data) {
   const {
     day, prevDay, nextDay, isToday, orders, kpis, shopping, forecast, handoffs = [], lowStock = [],
-    series = [], newPerDay = [], statuses = [], byHour = [], topProducts = [], flash, theme, role = 'owner'
+    series = [], newPerDay = [], statuses = [], byHour = [], topProducts = [], flash, theme, role = 'owner', waHealth = null
   } = data;
   const back = `/admin?day=${day}`;
   const fmt = (v, short) => (short ? compact(locale, v) : money(locale, v));
@@ -173,7 +173,7 @@ ${section(L.forecast, quantitiesTable(L, locale, forecast, 'weekly_avg', L.noDat
 ${isToday ? liveUpdates(L) : ''}`;
 
   const pending = kpis.toCheck + handoffs.length;
-  return layout(L, { role, title: `${pending ? `(${pending}) ` : ''}${L.title}`, active: 'orders', body, flash, theme });
+  return layout(L, { role, waHealth, title: `${pending ? `(${pending}) ` : ''}${L.title}`, active: 'orders', body, flash, theme });
 }
 
 function handoffCard(L, handoffs) {

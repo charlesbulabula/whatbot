@@ -634,6 +634,20 @@ const fr = {
   sttStatus: 'Messages vocaux',
   trackingStatus: 'Suivi de livraison',
 
+  waBrokenTitle: 'Le bot ne peut plus répondre',
+  waExpired: (when) => `Le jeton WhatsApp a expiré${when ? ` le ${when}` : ''}. Les messages entrants arrivent toujours, mais aucune réponse ne part.`,
+  waInvalid: 'Le jeton WhatsApp est refusé par Meta. Les messages entrants arrivent toujours, mais aucune réponse ne part.',
+  waUnconfigured: 'Aucun jeton WhatsApp configuré.',
+  waUnreachable: 'Meta est injoignable pour le moment : état du jeton inconnu.',
+  waFixLink: 'Voir les détails',
+  waTokenState: 'État du jeton',
+  waTokenOk: 'Valide',
+  waTokenExpired: 'Expiré',
+  waTokenInvalid: 'Refusé',
+  waTokenUnknown: 'Inconnu',
+  waNumber: 'Numéro connecté',
+  waQuality: 'Qualité du numéro',
+
 };
 
 const en = {
@@ -1268,6 +1282,20 @@ const en = {
   winbackHint: 'A personal promo code, valid 14 days and usable once, is created for each customer reached.',
   sttStatus: 'Voice notes',
   trackingStatus: 'Delivery tracking',
+
+  waBrokenTitle: 'The bot cannot reply any more',
+  waExpired: (when) => `The WhatsApp token expired${when ? ` on ${when}` : ''}. Incoming messages still arrive, but no answer goes out.`,
+  waInvalid: 'Meta is refusing the WhatsApp token. Incoming messages still arrive, but no answer goes out.',
+  waUnconfigured: 'No WhatsApp token configured.',
+  waUnreachable: 'Meta is unreachable right now: the token state is unknown.',
+  waFixLink: 'See the details',
+  waTokenState: 'Token state',
+  waTokenOk: 'Valid',
+  waTokenExpired: 'Expired',
+  waTokenInvalid: 'Refused',
+  waTokenUnknown: 'Unknown',
+  waNumber: 'Connected number',
+  waQuality: 'Number quality',
 
 };
 

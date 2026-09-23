@@ -1,6 +1,19 @@
 // Settings, split into tabs so each screen holds one decision at a time.
 import { esc, card, layout, icon, tabs, badge, alert, table } from '../ui.js';
 
+/** Live state of the WhatsApp token, the thing that silently breaks everything. */
+function waRows(L, health) {
+  if (!health) return '';
+  const tone = health.ok ? 'success' : health.reason === 'unreachable' ? 'warning' : 'danger';
+  const label = health.ok ? L.waTokenOk
+    : health.reason === 'expired' ? L.waTokenExpired
+      : health.reason === 'unreachable' ? L.waTokenUnknown : L.waTokenInvalid;
+  return `<dt>${esc(L.waTokenState)}</dt><dd>${badge(label, tone, { dot: health.ok })}
+${health.expiresAt ? `<span class="muted"> — ${esc(health.expiresAt)}</span>` : ''}</dd>
+${health.number ? `<dt>${esc(L.waNumber)}</dt><dd>${esc(health.number)}${health.name ? ` — ${esc(health.name)}` : ''}</dd>` : ''}
+${health.quality ? `<dt>${esc(L.waQuality)}</dt><dd>${esc(health.quality)}</dd>` : ''}`;
+}
+
 const SETTINGS_TABS = (L) => [
   ['shop', '/admin/settings', L.tabShop, 'store'],
   ['hours', '/admin/settings?tab=hours', L.openingHours, 'clock'],
@@ -19,7 +32,7 @@ const form = (L, tab, inner) => `<form method="post" action="/admin/settings">
 <div class="actions" style="margin-top:1.25rem"><button class="btn btn--primary">${icon('check', 17)} ${esc(L.save)}</button></div></form>`;
 
 export function settingsPage(L, locale, data) {
-  const { shop, smtpReady, tab = 'shop', system = {}, flash, flashTone, theme, role = 'owner' } = data;
+  const { shop, smtpReady, tab = 'shop', system = {}, flash, flashTone, theme, role = 'owner', waHealth = null } = data;
 
   const panels = {
     shop: form(L, 'shop', card(`<div class="form-grid">
@@ -118,6 +131,7 @@ ${smtpReady
 <dt>${esc(L.publicUrl)}</dt><dd>${esc(system.publicUrl || '—')}</dd>
 <dt>${esc(L.timezone)}</dt><dd>${esc(system.tz || '—')}</dd>
 <dt>${esc(L.whatsappStatus)}</dt><dd>${system.waReady ? badge(L.configured, 'success', { dot: true }) : badge(L.notConfigured, 'danger')}</dd>
+${waRows(L, system.waHealth)}
 <dt>${esc(L.aiStatus)}</dt><dd>${system.aiReady ? badge(L.configured, 'success', { dot: true }) : badge(L.notConfigured, 'gray')}</dd>
 <dt>${esc(L.sttStatus)}</dt><dd>${system.sttReady ? badge(L.configured, 'success', { dot: true }) : badge(L.notConfigured, 'gray')}</dd>
 <dt>${esc(L.tabCatalogue)}</dt><dd>${system.catalogReady ? badge(L.configured, 'success', { dot: true }) : badge(L.notConfigured, 'gray')}</dd>
@@ -129,5 +143,5 @@ ${smtpReady
   };
 
   const body = `${tabs(SETTINGS_TABS(L), tab)}${panels[tab] || panels.shop}`;
-  return layout(L, { role, title: L.settings, active: 'settings', body, flash, flashTone, theme });
+  return layout(L, { role, waHealth, title: L.settings, active: 'settings', body, flash, flashTone, theme });
 }

@@ -188,7 +188,9 @@ function navCounts() {
  * The page shell. `active` is the sidebar key, `title` shows in the header and
  * the tab, `theme` is the saved light/dark choice ('' = follow the device).
  */
-export function layout(L, { title, active, body, flash, flashTone = '', theme = '', search = '', role = 'owner' }) {
+export function layout(L, {
+  title, active, body, flash, flashTone = '', theme = '', search = '', role = 'owner', waHealth = null,
+}) {
   const can = (area) => roleCan(role, area);
   // The push key is generated on first use and then stable, so every page can
   // offer notifications without the router threading it through.
@@ -261,6 +263,7 @@ ${FAVICON}${FONT_LINK}<style>${CSS}</style></head><body><div class="hk-wrapper">
 </header>
 <main class="hk-page">
 ${flash ? alert(esc(flash), flashTone, flashTone === 'danger' ? 'alert' : 'check') : ''}
+${waBanner(L, waHealth)}
 ${!open ? alert(`${esc(L.closedBanner)} <a href="/admin/settings">${esc(L.closedBannerLink)}</a>`, 'warning', 'clock') : ''}
 ${body}</main></div>
 ${shellScript(theme)}${pushScript(vapidPublicKey)}</body></html>`;
@@ -311,6 +314,25 @@ if(window.EventSource){var es=new EventSource('/admin/events');es.addEventListen
 es.addEventListener('error',function(){});}
 else{setInterval(function(){if(!busy())location.reload()},${fallbackSeconds * 1000});}
 })();</script>`;
+}
+
+/**
+ * The one failure the shop must never miss: the bot still receives messages but
+ * every answer is refused, so orders are silently lost.
+ */
+function waBanner(L, health) {
+  if (!health || health.ok || health.disabled) return '';
+  const text = health.reason === 'expired'
+    ? L.waExpired(health.expiresAt || '')
+    : health.reason === 'unconfigured'
+      ? L.waUnconfigured
+      : health.reason === 'unreachable'
+        ? L.waUnreachable
+        : L.waInvalid;
+  // A network blip is a warning; a dead token is an emergency.
+  const tone = health.reason === 'unreachable' ? 'warning' : 'danger';
+  return alert(`<b>${esc(L.waBrokenTitle)}</b> — ${esc(text)}
+ <a href="/admin/settings?tab=system">${esc(L.waFixLink)}</a>`, tone, 'alert');
 }
 
 /**

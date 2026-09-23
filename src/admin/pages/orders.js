@@ -14,7 +14,7 @@ const STATUSES = ['awaiting_payment', 'paid', 'preparing', 'on_the_way', 'delive
 /* ------------------------------ order list ------------------------------ */
 
 export function ordersPage(L, locale, data) {
-  const { rows, total, filters, zones, page, pageSize, flash, theme, role = 'owner' } = data;
+  const { rows, total, filters, zones, page, pageSize, flash, theme, role = 'owner', waHealth = null } = data;
   const q = (patch = {}) => {
     const p = new URLSearchParams();
     const merged = { ...filters, ...patch };
@@ -94,6 +94,7 @@ ${o.payment_proof ? iconAction(`/admin/orders/${o.id}/proof`, 'qr', L.proof, { t
 
   return layout(L, {
     role,
+    waHealth,
     title: L.navOrders,
     active: 'orders',
     body: `${bar}${filterChips(chips)}${head}${list}
@@ -105,7 +106,7 @@ ${pager(L, { page, pageSize, total, url: (p) => q({ page: p || '' }) })}`,
 
 /* ----------------------------- order detail ----------------------------- */
 
-export function orderPage(L, locale, { order, messages, timeline, flash, theme , role = 'owner' }) {
+export function orderPage(L, locale, { order, messages, timeline, flash, theme , role = 'owner', waHealth = null }) {
   const day = dayOf(order.created_at);
   const docs = `<div class="actions">
 <a class="btn" href="/admin/orders/${order.id}/invoice" target="_blank">${icon('file', 17)} ${esc(L.invoice)}</a>
@@ -124,7 +125,7 @@ ${order.payment_proof
 ${section(L.timeline, card(timelineList(L, locale, timeline)))}
 ${section(`${L.conversation} — ${order.customer.name || order.customer.phone}`, card(chat(L, messages)))}
 ${liveUpdates(L)}`;
-  return layout(L, { role, title: order.reference, active: 'orders', body, flash, theme });
+  return layout(L, { role, waHealth, title: order.reference, active: 'orders', body, flash, theme });
 }
 
 const TIMELINE_ICON = {
@@ -262,7 +263,7 @@ ${order.address_note ? `<p style="margin-top:1rem"><b class="strong">${esc(L.add
 }
 
 /** The day's picking list: what to buy and pack, grouped by product and size. */
-export function picklistPage(L, locale, { day, shopping, orders, shop , role = 'owner' }) {
+export function picklistPage(L, locale, { day, shopping, orders, shop , role = 'owner', waHealth = null }) {
   const inner = `<article class="doc">
 <header class="doc__head"><div><div class="doc__brand">🌶️ ${esc(shop.name)}</div>
 <div class="strong">${esc(L.shoppingList)} — ${esc(day)}</div>
@@ -281,7 +282,7 @@ ${orders.length
 /* --------------------------- public verification ------------------------ */
 
 /** The page the invoice QR code opens. No login, no personal data beyond a first name. */
-export function verifyPage(L, locale, { order, shop, valid , role = 'owner' }) {
+export function verifyPage(L, locale, { order, shop, valid , role = 'owner', waHealth = null }) {
   const body = valid
     ? `<div class="verify"><div class="verify__mark badge--success">${icon('shield', 32)}</div>
 <h1>${esc(L.invoiceValid)}</h1>

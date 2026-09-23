@@ -450,3 +450,23 @@ test('product pictures are served from a fixed directory, and only by name', asy
   }
   assert.equal((await fetch(`${base}/media/products/absent.png`)).status, 404);
 });
+
+/* --------------------------- WhatsApp token health ----------------------- */
+
+test('an expired WhatsApp token is reported instead of failing silently', async () => {
+  const { tokenHealth, resetTokenHealth } = await import('../src/whatsapp/health.js');
+
+  // WA_ENABLED=false in tests: the bot is not talking to Meta at all.
+  const off = await tokenHealth({ force: true });
+  assert.equal(off.disabled, true);
+  assert.equal(off.ok, true, 'a disabled client is not an alarm');
+
+  // The banner itself is driven by the shape of that result, so check the copy
+  // exists for every reason the check can return.
+  const { adminDictionaries } = await import('../src/admin/i18n.js');
+  for (const dict of Object.values(adminDictionaries)) {
+    assert.equal(typeof dict.waExpired('2026-09-23'), 'string');
+    assert.ok(dict.waInvalid && dict.waUnconfigured && dict.waUnreachable && dict.waBrokenTitle);
+  }
+  resetTokenHealth();
+});

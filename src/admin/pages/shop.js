@@ -15,7 +15,7 @@ const CATALOGUE_TABS = (L) => [
 
 /* ---------------------------- delivery slots ---------------------------- */
 
-export function slotsPage(L, locale, { slots, load, day, flash, theme, role = 'owner' }) {
+export function slotsPage(L, locale, { slots, load, day, flash, theme, role = 'owner', waHealth = null }) {
   const forms = slots.map((s) => `<form id="slot-${s.id}" method="post" action="/admin/slots/${s.id}"></form>`).join('');
   const booked = new Map(load.map((l) => [l.slot_id, l.n]));
 
@@ -62,14 +62,14 @@ ${section(L.slotToday(day), load.length
       load.map((l) => `<tr><td>${esc(l.slot_label || '—')}</td><td class="num tabnum">${l.n}</td></tr>`).join(''))
     : card(empty(L.noOrders, 'receipt')))}`;
 
-  return layout(L, { role, title: L.navSlots, active: 'slots', body, flash, theme });
+  return layout(L, { role, waHealth, title: L.navSlots, active: 'slots', body, flash, theme });
 }
 
 /* -------------------------------- staff --------------------------------- */
 
 const ROLE_TONE = { owner: 'primary', seller: 'info', rider: 'gray' };
 
-export function staffPage(L, locale, { rows, owner, flash, flashTone, theme, role = 'owner' }) {
+export function staffPage(L, locale, { rows, owner, flash, flashTone, theme, role = 'owner', waHealth = null }) {
   const roleOptions = (selected) =>
     ['owner', 'seller', 'rider']
       .map((r) => `<option value="${r}"${r === selected ? ' selected' : ''}>${esc(L.roles[r])}</option>`)
@@ -116,12 +116,12 @@ ${iconPost(`/admin/staff/${a.id}/delete`, 'trash', L.delete, { tone: 'danger', c
   const body = `${alert(esc(L.ownerAccountHint(owner)), '', 'info')}
 ${table_}
 <div class="grid-2" style="margin-top:1.75rem">${add}${roles}</div>`;
-  return layout(L, { role, title: L.navStaff, active: 'staff', body, flash, flashTone, theme });
+  return layout(L, { role, waHealth, title: L.navStaff, active: 'staff', body, flash, flashTone, theme });
 }
 
 /* ----------------------------- subscriptions ---------------------------- */
 
-export function subscriptionsPage(L, locale, { rows, flash, theme, role = 'owner' }) {
+export function subscriptionsPage(L, locale, { rows, flash, theme, role = 'owner', waHealth = null }) {
   const list = rows
     .map((s) => {
       let items = [];
@@ -150,13 +150,13 @@ ${iconPost(`/admin/subscriptions/${s.id}/delete`, 'trash', L.delete, { tone: 'da
 ${rows.length
     ? table([L.customers, L.day, { label: L.items, num: true }, L.statusLabel, L.subLastRun, ''], list)
     : card(empty(L.noSubscriptions, 'refresh'))}`;
-  return layout(L, { role, title: L.navSubscriptions, active: 'subscriptions', body, flash, theme });
+  return layout(L, { role, waHealth, title: L.navSubscriptions, active: 'subscriptions', body, flash, theme });
 }
 
 /* ------------------------------ accounting ------------------------------ */
 
 export function accountingPage(L, locale, data) {
-  const { from, to, entries, months, totals, shop, theme, flash, role = 'owner' } = data;
+  const { from, to, entries, months, totals, shop, theme, flash, role = 'owner', waHealth = null } = data;
 
   const rows = entries
     .map((e) => `<tr><td class="nowrap">${esc(e.day)}</td>
@@ -211,13 +211,13 @@ ${section(`${L.ledgerTitle} — ${from} → ${to}`, entries.length
     ? table([L.date, L.ledgerKind, L.reference, L.label, L.payment, { label: L.amount, num: true }], rows)
     : card(empty(L.stats.empty, 'file')))}`;
 
-  return layout(L, { role, title: L.navAccounting, active: 'accounting', body, flash, theme });
+  return layout(L, { role, waHealth, title: L.navAccounting, active: 'accounting', body, flash, theme });
 }
 
 /* --------------------- one product: variants & extras ------------------- */
 
 export function productPage(L, locale, data) {
-  const { product, variants, extras, globalExtras, flash, theme, role = 'owner' } = data;
+  const { product, variants, extras, globalExtras, flash, theme, role = 'owner', waHealth = null } = data;
 
   const photo = card(`<form method="post" action="/admin/products/${product.id}/photo" enctype="multipart/form-data">
 ${product.photo
@@ -310,6 +310,7 @@ ${section(L.addExtra, addExtra)}`;
 
   return layout(L, {
     role,
+    waHealth,
     title: locale === 'en' ? product.name_en : product.name_fr,
     active: 'products',
     body,

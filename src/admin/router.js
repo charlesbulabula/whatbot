@@ -14,6 +14,7 @@ import { text } from '../bot/messages.js';
 import * as settings from '../shop/settings.js';
 import { COUPON_KINDS, normalizeCode } from '../shop/coupons.js';
 import { smtpConfigured, sendTestEmail } from '../mail.js';
+import { tokenHealth, resetTokenHealth } from '../whatsapp/health.js';
 import * as staff from '../shop/staff.js';
 import { vapid, push } from '../pwa.js';
 import * as waCatalog from '../shop/wa-catalog.js';
@@ -190,6 +191,16 @@ const toInt = (v) => Math.max(0, Math.round(Number(v) || 0));
 const str = (v, max = 120) => String(v ?? '').trim().slice(0, max);
 const pageOf = (v) => Math.max(0, Math.round(Number(v) || 0));
 
+// Refreshed out of band: a page render never blocks on a Graph API call.
+let lastHealth = null;
+adminRouter.use((req, res, next) => {
+  res.locals.waHealth = lastHealth;
+  tokenHealth().then((h) => {
+    lastHealth = h;
+  }).catch(() => {});
+  next();
+});
+
 /** Records what the dashboard just changed, for /admin/audit. */
 const log = (res, action, target, detail) => db.audit(res.locals.actor || 'admin', action, target, detail);
 
@@ -247,6 +258,7 @@ adminRouter.get('/', (req, res) => {
       flash: req.query.flash,
       theme: res.locals.theme,
     role: res.locals.role,
+    waHealth: res.locals.waHealth,
     }),
   );
 });
@@ -285,6 +297,7 @@ adminRouter.get('/orders', (req, res) => {
     flash: req.query.flash,
     theme: res.locals.theme,
     role: res.locals.role,
+    waHealth: res.locals.waHealth,
   }));
 });
 
@@ -313,6 +326,7 @@ adminRouter.get('/orders/:id', (req, res) => {
     flash: req.query.flash,
     theme: res.locals.theme,
     role: res.locals.role,
+    waHealth: res.locals.waHealth,
   }));
 });
 
@@ -418,6 +432,7 @@ adminRouter.get('/products', (req, res) => {
     flash: req.query.flash,
     theme: res.locals.theme,
     role: res.locals.role,
+    waHealth: res.locals.waHealth,
   }));
 });
 
@@ -583,6 +598,7 @@ adminRouter.get('/customers', (req, res) => {
     flash: req.query.flash,
     theme: res.locals.theme,
     role: res.locals.role,
+    waHealth: res.locals.waHealth,
   }));
 });
 
@@ -643,6 +659,7 @@ adminRouter.get('/customers/:id', (req, res) => {
     flashTone: req.query.tone === 'danger' ? 'danger' : '',
     theme: res.locals.theme,
     role: res.locals.role,
+    waHealth: res.locals.waHealth,
   }));
 });
 
@@ -764,6 +781,7 @@ adminRouter.get('/loyalty', (req, res) => {
     flash: req.query.flash,
     theme: res.locals.theme,
     role: res.locals.role,
+    waHealth: res.locals.waHealth,
   }));
 });
 
@@ -785,6 +803,7 @@ adminRouter.get('/expenses', (req, res) => {
     flash: req.query.flash,
     theme: res.locals.theme,
     role: res.locals.role,
+    waHealth: res.locals.waHealth,
   }));
 });
 
@@ -816,6 +835,7 @@ adminRouter.get('/audit', (req, res) => {
     pageSize: size,
     theme: res.locals.theme,
     role: res.locals.role,
+    waHealth: res.locals.waHealth,
   }));
 });
 
@@ -844,6 +864,7 @@ adminRouter.get('/broadcast', (req, res) => {
     flash: req.query.flash,
     theme: res.locals.theme,
     role: res.locals.role,
+    waHealth: res.locals.waHealth,
   }));
 });
 
@@ -872,7 +893,7 @@ adminRouter.post('/broadcast', async (req, res) => {
 
 const SETTINGS_TABS = ['shop', 'hours', 'payment', 'alerts', 'loyalty', 'tiers', 'catalogue', 'accounting', 'system'];
 
-function systemInfo() {
+function systemInfo(health = null) {
   let dbSize = '—';
   try {
     if (config.dbPath !== ':memory:') dbSize = `${(fs.statSync(config.dbPath).size / 1e6).toFixed(1)} MB`;
@@ -888,24 +909,26 @@ function systemInfo() {
     publicUrl: config.publicUrl || '—',
     tz: process.env.TZ || Intl.DateTimeFormat().resolvedOptions().timeZone,
     waReady: Boolean(config.whatsapp.token && config.whatsapp.phoneNumberId),
+    waHealth: health,
     aiReady: Boolean(config.ai.apiKey),
     sttReady: Boolean(config.stt.provider && config.stt.apiKey),
     catalogReady: waCatalog.isEnabled(),
   };
 }
 
-adminRouter.get('/settings', (req, res) => {
+adminRouter.get('/settings', async (req, res) => {
   const { L, locale } = res.locals;
   const tab = SETTINGS_TABS.includes(req.query.tab) ? req.query.tab : 'shop';
   res.send(views.settingsPage(L, locale, {
     shop: settings.get(),
     smtpReady: smtpConfigured(),
     tab,
-    system: tab === 'system' ? systemInfo() : {},
+    system: tab === 'system' ? systemInfo(await tokenHealth({ force: true })) : {},
     flash: req.query.flash,
     flashTone: req.query.tone === 'danger' ? 'danger' : '',
     theme: res.locals.theme,
     role: res.locals.role,
+    waHealth: res.locals.waHealth,
   }));
 });
 
@@ -974,6 +997,7 @@ adminRouter.post('/settings', (req, res) => {
   }
 
   settings.save(patch);
+  resetTokenHealth();
   log(res, 'settings.save', tab);
   res.redirect(withFlash(`/admin/settings?tab=${tab}`, res.locals.L.saved));
 });
@@ -1027,6 +1051,7 @@ adminRouter.get('/staff', (req, res) => {
     flashTone: req.query.tone === 'danger' ? 'danger' : '',
     theme: res.locals.theme,
     role: res.locals.role,
+    waHealth: res.locals.waHealth,
   }));
 });
 
@@ -1090,6 +1115,7 @@ adminRouter.get('/slots', (req, res) => {
     flash: req.query.flash,
     theme: res.locals.theme,
     role: res.locals.role,
+    waHealth: res.locals.waHealth,
   }));
 });
 
@@ -1127,6 +1153,7 @@ adminRouter.get('/products/:id/edit', (req, res) => {
     flash: req.query.flash,
     theme: res.locals.theme,
     role: res.locals.role,
+    waHealth: res.locals.waHealth,
   }));
 });
 
@@ -1246,6 +1273,7 @@ adminRouter.get('/subscriptions', (req, res) => {
     flash: req.query.flash,
     theme: res.locals.theme,
     role: res.locals.role,
+    waHealth: res.locals.waHealth,
   }));
 });
 
@@ -1319,7 +1347,7 @@ adminRouter.get('/route', (req, res) => {
 target="_blank" rel="noopener noreferrer">${views.esc(L.route.sendWhatsApp)}</a></div></div></div>
 <section class="section"><div class="section__title"><h2>${views.esc(L.route.toDeliver)} (${pending.length})</h2></div>
 ${pending.length ? `<div class="grid">${riderCards(L, pending)}</div>` : `<div class="card"><div class="card__body"><p class="muted">${views.esc(L.route.empty)}</p></div></div>`}</section>`;
-  res.send(views.layout(L, { title: `${L.route.title} — ${day}`, active: 'route', body, theme: res.locals.theme, role: res.locals.role }));
+  res.send(views.layout(L, { title: `${L.route.title} — ${day}`, active: 'route', body, theme: res.locals.theme, role: res.locals.role, waHealth: res.locals.waHealth }));
 });
 
 /* --------------------------------- stats ------------------------------- */
@@ -1348,6 +1376,7 @@ adminRouter.get('/stats', (req, res) => {
       expenses: db.expenseTotal(from, to),
       theme: res.locals.theme,
     role: res.locals.role,
+    waHealth: res.locals.waHealth,
     }),
   );
 });

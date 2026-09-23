@@ -13,7 +13,7 @@ const CATALOGUE_TABS = (L) => [
 
 /* ------------------------------- products ------------------------------- */
 
-export function productsPage(L, locale, { products, lowStock = [], flash, theme , role = 'owner' }) {
+export function productsPage(L, locale, { products, lowStock = [], flash, theme , role = 'owner', waHealth = null }) {
   // Each row's <form> lives outside the table and is wired to its inputs with the
   // form="" attribute, so the table markup stays valid and the row stays a row.
   const forms = products
@@ -72,12 +72,12 @@ ${iconPost(`/admin/products/${p.id}/delete`, 'trash', L.delete, { tone: 'danger'
   const body = `${tabs(CATALOGUE_TABS(L), 'products')}${warn}
 <p class="muted">${esc(L.stockHint)}</p>
 <div hidden>${forms}</div>${list}${section(L.addProduct, add)}`;
-  return layout(L, { role, title: L.products, active: 'products', body, flash, theme });
+  return layout(L, { role, waHealth, title: L.products, active: 'products', body, flash, theme });
 }
 
 /* --------------------------- delivery zones ----------------------------- */
 
-export function zonesPage(L, locale, { zones, flash, theme , role = 'owner' }) {
+export function zonesPage(L, locale, { zones, flash, theme , role = 'owner', waHealth = null }) {
   const forms = zones.map((z) => `<form id="zone-${z.id}" method="post" action="/admin/zones/${z.id}"></form>`).join('');
   const rows = zones
     .map((z) => {
@@ -106,14 +106,14 @@ ${iconPost(`/admin/zones/${z.id}/delete`, 'trash', L.delete, { tone: 'danger', c
 </form>`, { head: `${icon('plus')}<h2>${esc(L.addZone)}</h2>` });
 
   const body = `${tabs(CATALOGUE_TABS(L), 'zones')}<p class="muted">${esc(L.zonesHint)}</p>${list}${section(L.addZone, add)}`;
-  return layout(L, { role, title: L.zones, active: 'zones', body, flash, theme });
+  return layout(L, { role, waHealth, title: L.zones, active: 'zones', body, flash, theme });
 }
 
 /* ------------------------------- coupons -------------------------------- */
 
 const KINDS = ['amount', 'percent', 'free_delivery'];
 
-export function couponsPage(L, locale, { coupons, flash, theme , role = 'owner' }) {
+export function couponsPage(L, locale, { coupons, flash, theme , role = 'owner', waHealth = null }) {
   const kindOptions = (selected) =>
     KINDS.map((k) => `<option value="${k}"${k === selected ? ' selected' : ''}>${esc(L.couponKinds[k])}</option>`).join('');
 
@@ -166,5 +166,5 @@ ${iconPost(`/admin/coupons/${c.id}/delete`, 'trash', L.delete, { tone: 'danger',
 
   const body = `${tabs(CATALOGUE_TABS(L), 'coupons')}<p class="muted">${esc(L.couponsHint)}</p>
 <div hidden>${forms}</div>${list}${section(L.addCoupon, add)}`;
-  return layout(L, { role, title: L.coupons, active: 'coupons', body, flash, theme });
+  return layout(L, { role, waHealth, title: L.coupons, active: 'coupons', body, flash, theme });
 }
