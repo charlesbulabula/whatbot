@@ -1,0 +1,27 @@
+# Subscribes the WhatsApp Business Account to this app so Meta delivers its
+# messages to the webhook (not always automatic, notably for the test number).
+name: Meta - subscribe WABA to app
+
+on:
+  workflow_dispatch:
+    inputs:
+      waba_id:
+        description: WhatsApp Business Account ID
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  subscribe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Subscribe and check
+        env:
+          WA_TOKEN: ${{ secrets.WA_TOKEN }}
+          WABA: ${{ inputs.waba_id }}
+        run: |
+          api=https://graph.facebook.com/v21.0/$WABA/subscribed_apps
+          echo "== before"; curl -s -H "Authorization: Bearer $WA_TOKEN" "$api"; echo
+          echo "== subscribe"; curl -s -X POST -H "Authorization: Bearer $WA_TOKEN" "$api"; echo
+          echo "== after"; curl -s -H "Authorization: Bearer $WA_TOKEN" "$api"; echo
