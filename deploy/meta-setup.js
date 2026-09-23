@@ -45,7 +45,13 @@ async function graph(path, { method = 'GET', body = null, asApp = false } = {}) 
     signal: AbortSignal.timeout(20_000),
   });
   const json = await res.json().catch(() => ({}));
-  return { status: res.status, json, error: json.error };
+  const error = json.error && {
+    ...json.error,
+    // error_user_msg carries the reason a human can act on.
+    message: [json.error.error_user_title, json.error.error_user_msg].filter(Boolean).join(' — ')
+      || json.error.message,
+  };
+  return { status: res.status, json, error };
 }
 
 /* ------------------------------ the templates ---------------------------- */
@@ -114,8 +120,8 @@ const TEMPLATES = [
     name: 'shop_alert',
     category: 'UTILITY',
     bodies: {
-      fr: 'Alerte boutique : {{1}} — {{2}}',
-      en: 'Shop alert: {{1}} — {{2}}',
+      fr: 'Nouvelle activité sur votre boutique concernant {{1}} : {{2}}. Ouvrez le tableau de bord pour voir le détail et répondre.',
+      en: 'New activity on your shop about {{1}}: {{2}}. Open the dashboard to see the details and reply.',
     },
     example: ['CMD-20260101-001', '12 000 FC'],
   },
