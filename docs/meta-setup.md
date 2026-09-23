@@ -162,6 +162,23 @@ noms ci-dessus dans les secrets GitHub correspondants et redéployez.
 
 ---
 
+## Le piège du secret GitHub
+
+**Chaque déploiement réécrit le `.env` du serveur à partir des secrets GitHub.**
+Si vous posez un jeton frais directement sur le serveur mais que le secret
+`WA_TOKEN` contient encore l'ancien, le prochain déploiement remet l'ancien — et
+le bot cesse de répondre sans prévenir.
+
+Deux protections sont en place :
+
+- le déploiement teste le jeton auprès de Meta et affiche en clair
+  `!! REFUSED BY META` si le secret est périmé ;
+- le tableau de bord affiche un bandeau rouge sur toutes les pages tant que le
+  jeton ne passe pas.
+
+Mais la règle simple reste : **le secret GitHub est la source de vérité.**
+Mettez-y le jeton, pas seulement sur le serveur.
+
 ## Ce qu'il faut savoir ensuite
 
 **Limite d'envoi.** Un nouveau compte peut démarrer une conversation avec 250

@@ -184,6 +184,28 @@ echo
 echo "==> Configuration status (names only)"
 remote "cd $REMOTE_DIR && node deploy/config-status.js .env"
 
+# A deploy rewrites .env from the secrets, so a stale WA_TOKEN secret silently
+# replaces a working token. Say so loudly instead of letting orders fail.
+echo
+echo "==> WhatsApp token"
+remote bash -s <<'REMOTE'
+cd /opt/whatbot
+set -a; . ./.env 2>/dev/null; set +a
+if [ -z "${WA_TOKEN:-}" ] || [ -z "${WA_PHONE_NUMBER_ID:-}" ]; then
+  echo "    not configured"
+  exit 0
+fi
+body=$(curl -s -m 15 -H "Authorization: Bearer $WA_TOKEN" \
+  "https://graph.facebook.com/${WA_GRAPH_VERSION:-v21.0}/$WA_PHONE_NUMBER_ID?fields=display_phone_number,quality_rating")
+case "$body" in
+  *'"error"'*)
+    echo "    !! REFUSED BY META — the bot receives messages but cannot answer."
+    echo "    !! Update the WA_TOKEN secret: a deploy always restores it from there."
+    ;;
+  *) echo "    accepted by Meta" ;;
+esac
+REMOTE
+
 echo
 echo "==> Meta webhook  : https://$DOMAIN/webhook  (verify token = WA_VERIFY_TOKEN)"
 echo "==> Dashboard     : https://$DOMAIN/admin    (user: admin, password = ADMIN_PASSWORD)"
