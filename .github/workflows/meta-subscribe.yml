@@ -8,6 +8,9 @@ on:
       waba_id:
         description: WhatsApp Business Account ID
         required: true
+      callback_url:
+        description: Optional. Force this WABA's webhooks to this URL (override_callback_uri)
+        required: false
 
 permissions:
   contents: read
@@ -20,8 +23,15 @@ jobs:
         env:
           WA_TOKEN: ${{ secrets.WA_TOKEN }}
           WABA: ${{ inputs.waba_id }}
+          CALLBACK: ${{ inputs.callback_url }}
+          WA_VERIFY_TOKEN: ${{ secrets.WA_VERIFY_TOKEN }}
         run: |
           api=https://graph.facebook.com/v21.0/$WABA/subscribed_apps
           echo "== before"; curl -s -H "Authorization: Bearer $WA_TOKEN" "$api"; echo
-          echo "== subscribe"; curl -s -X POST -H "Authorization: Bearer $WA_TOKEN" "$api"; echo
-          echo "== after"; curl -s -H "Authorization: Bearer $WA_TOKEN" "$api"; echo
+          if [ -n "$CALLBACK" ]; then
+            echo "== subscribe with callback override"
+            curl -s -X POST -H "Authorization: Bearer $WA_TOKEN" --data-urlencode "override_callback_uri=$CALLBACK" --data-urlencode "verify_token=$WA_VERIFY_TOKEN" "$api"; echo
+          else
+            echo "== subscribe"; curl -s -X POST -H "Authorization: Bearer $WA_TOKEN" "$api"; echo
+          fi
+          echo "== after"; curl -s -H "Authorization: Bearer $WA_TOKEN" "$api?fields=whatsapp_business_api_data,override_callback_uri"; echo
