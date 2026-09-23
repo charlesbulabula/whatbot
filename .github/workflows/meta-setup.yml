@@ -1,0 +1,53 @@
+# Sets up and audits the Meta side of the WhatsApp Business account.
+#
+# Run "check" first: it changes nothing and lists exactly what is missing.
+# Run "apply" once the token is a permanent System User token: it subscribes the
+# WhatsApp account to the app and submits the message templates for approval.
+#
+# Needs the repository secrets WA_TOKEN, WA_APP_SECRET, WA_PHONE_NUMBER_ID,
+# WA_VERIFY_TOKEN, and the ids passed as inputs below.
+name: Meta - setup
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: check (read-only) or apply (subscribe + create templates)
+        type: choice
+        options: [check, apply]
+        default: check
+      app_id:
+        description: Meta app ID
+        default: '1803892427276261'
+      waba_id:
+        description: WhatsApp Business Account ID
+        default: '3424779654392612'
+      register_pin:
+        description: 'Optional: 6-digit PIN to register the number for the Cloud API'
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  meta:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Run
+        env:
+          WA_TOKEN: ${{ secrets.WA_TOKEN }}
+          WA_APP_SECRET: ${{ secrets.WA_APP_SECRET }}
+          WA_PHONE_NUMBER_ID: ${{ secrets.WA_PHONE_NUMBER_ID }}
+          WA_VERIFY_TOKEN: ${{ secrets.WA_VERIFY_TOKEN }}
+          WA_APP_ID: ${{ inputs.app_id }}
+          WA_WABA_ID: ${{ inputs.waba_id }}
+          PUBLIC_URL: https://${{ vars.DOMAIN || 'bot.ll-aca.site' }}
+        run: |
+          args=""
+          [ "${{ inputs.mode }}" = "apply" ] && args="--apply"
+          [ -n "${{ inputs.register_pin }}" ] && args="$args --register ${{ inputs.register_pin }}"
+          node deploy/meta-setup.js $args

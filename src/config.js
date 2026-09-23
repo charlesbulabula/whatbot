@@ -33,6 +33,7 @@ export const config = {
       weeklyReminder: process.env.WA_TEMPLATE_WEEKLY_REMINDER || '',
       survey: process.env.WA_TEMPLATE_SURVEY || '',
       waitlistOpen: process.env.WA_TEMPLATE_WAITLIST_OPEN || '',
+      winback: process.env.WA_TEMPLATE_WINBACK || '',
       adminAlert: process.env.WA_TEMPLATE_ADMIN_ALERT || '',
     },
     templateLanguages: {

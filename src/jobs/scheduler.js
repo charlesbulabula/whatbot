@@ -282,7 +282,7 @@ export async function winback(now = new Date()) {
           code,
           days: 14,
         })),
-        templateKey: 'weeklyReminder',
+        templateKey: 'winback',
         templateParams: [customer.name || '', code],
       });
       if (result === 'sent' || result === 'template') sent += 1;
