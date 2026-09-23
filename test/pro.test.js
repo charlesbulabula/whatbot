@@ -470,3 +470,53 @@ test('an expired WhatsApp token is reported instead of failing silently', async 
   }
   resetTokenHealth();
 });
+
+/* ------------------------------- demo data ------------------------------- */
+
+test('demo data can be created and removed without touching the real shop', async () => {
+  const { execFileSync } = await import('node:child_process');
+  // The seeder runs as its own process against a file database; the suite uses
+  // an in-memory one, so exercise it on a throwaway file.
+  const os = await import('node:os');
+  const path = await import('node:path');
+  const fs = await import('node:fs');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'whatbot-demo-'));
+  const file = path.join(dir, 'demo.db');
+  const env = { ...process.env, DB_PATH: file, WA_ENABLED: 'false', NODE_ENV: 'test', SHOP_HOURS: '24/7' };
+
+  // A real customer and a real expense, which must survive both operations.
+  execFileSync(process.execPath, ['-e', `
+    process.env.DB_PATH = ${JSON.stringify(file)};
+    const db = await import('./src/db/index.js');
+    const { seedIfEmpty } = await import('./src/db/seed.js');
+    seedIfEmpty();
+    db.seedZonesIfEmpty(['Gombe'], 2000);
+    db.touchCustomer('243811111111');
+    db.createExpense({ day: '2026-01-01', category: 'stock', label: 'Vrai achat', amount: 1000 });
+  `.replace(/\n/g, '')], { env, input: '' });
+
+  const run = (...args) =>
+    execFileSync(process.execPath, ['deploy/seed-demo.js', ...args], { env, encoding: 'utf8' });
+
+  assert.match(run('--apply'), /Demo data created: 8 customers, \d+ orders/);
+  assert.match(run(), /Demo data present: 8 customers/);
+  assert.match(run('--apply'), /already present/, 'seeding twice is refused');
+
+  assert.match(run('--purge'), /Demo data removed: 8 customers/);
+  assert.match(run(), /Demo data present: 0 customers, 0 orders, 0 expenses/);
+
+  // The real records are untouched.
+  const left = execFileSync(process.execPath, ['-e', `
+    process.env.DB_PATH = ${JSON.stringify(file)};
+    const db = await import('./src/db/index.js');
+    console.log(JSON.stringify({
+      customers: db.listCustomers().map((c) => c.phone),
+      expenses: db.listExpenses('2026-01-01', '2026-01-01').map((e) => e.label),
+    }));
+  `.replace(/\n/g, '')], { env, encoding: 'utf8' });
+  const state = JSON.parse(left);
+  assert.deepEqual(state.customers, ['243811111111'], 'the real customer is still there, alone');
+  assert.deepEqual(state.expenses, ['Vrai achat']);
+
+  fs.rmSync(dir, { recursive: true, force: true });
+});
