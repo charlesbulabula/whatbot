@@ -3,6 +3,7 @@
 // delivery zones. Usage policy: identify the app, at most 1 request/second.
 import { config } from '../config.js';
 import { logger } from '../utils/logger.js';
+import { listZones } from '../db/index.js';
 
 const ENDPOINT = 'https://nominatim.openstreetmap.org/reverse';
 const ADDRESS_FIELDS = ['suburb', 'city_district', 'municipality', 'county', 'quarter', 'neighbourhood', 'town', 'village', 'city'];
@@ -19,8 +20,17 @@ const fold = (s) =>
     .replace(/[^a-z0-9]+/g, ' ')
     .trim();
 
+/**
+ * The areas the shop serves: the `zones` table, or DELIVERY_ZONES while the
+ * table is still empty (fresh install, before the first boot seeds it).
+ */
+function servedZoneNames() {
+  const zones = listZones({ onlyActive: true });
+  return zones.length ? zones.map((z) => z.name) : config.shop.zones;
+}
+
 /** Finds which served zone a Nominatim address belongs to (most specific field first). */
-export function matchZone(address, zones = config.shop.zones) {
+export function matchZone(address, zones = servedZoneNames()) {
   const byName = new Map(zones.map((z) => [fold(z), z]));
   for (const field of ADDRESS_FIELDS) {
     const zone = byName.get(fold(address?.[field]));

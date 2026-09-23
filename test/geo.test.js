@@ -17,6 +17,15 @@ test('Nominatim addresses are matched to served zones, commune prefixes and acce
   assert.equal(matchZone({ suburb: 'NGALIÉMA' }, zones), 'Ngaliema');
   assert.equal(matchZone(MASINA, zones), null);
   assert.equal(matchZone({ city: 'Kinshasa' }, zones), null);
+});
+
+test('a shared location is matched against the areas of the dashboard, not the .env list', async () => {
+  const db = await import('../src/db/index.js');
+  db.createZone({ name: 'Masina', fee: 4000 });
+  assert.equal(matchZone(MASINA), 'Masina', 'an area added in the dashboard is recognised');
+
+  db.updateZone(db.findZoneByName('Masina').id, { active: 0 });
+  assert.equal(matchZone(MASINA), null, 'a paused area is not a served zone any more');
   assert.equal(placeLabel(MASINA), 'Masina');
 });
 
