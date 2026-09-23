@@ -3,7 +3,8 @@
 import { money } from '../../i18n/index.js';
 import {
   esc, linkify, card, section, empty, badge, statusBadge, paymentBadge, waLink, table, pager,
-  layout, liveUpdates, icon, productLabel, utcTime, utcDateTime, dayOf, iconAction, filterChips, avatar,
+  layout, liveUpdates, icon, productLabel, variantName, extrasName, utcTime, utcDateTime, dayOf,
+  iconAction, filterChips, avatar,
 } from '../ui.js';
 import { orderCard, statusActions, quantitiesTable } from './dashboard.js';
 import { CSS, FONT_LINK, FAVICON } from '../theme.js';
@@ -13,7 +14,7 @@ const STATUSES = ['awaiting_payment', 'paid', 'preparing', 'on_the_way', 'delive
 /* ------------------------------ order list ------------------------------ */
 
 export function ordersPage(L, locale, data) {
-  const { rows, total, filters, zones, page, pageSize, flash, theme } = data;
+  const { rows, total, filters, zones, page, pageSize, flash, theme, role = 'owner' } = data;
   const q = (patch = {}) => {
     const p = new URLSearchParams();
     const merged = { ...filters, ...patch };
@@ -92,6 +93,7 @@ ${o.payment_proof ? iconAction(`/admin/orders/${o.id}/proof`, 'qr', L.proof, { t
 <button class="btn no-print" onclick="window.print()">${icon('print', 17)} ${esc(L.print)}</button></div>`;
 
   return layout(L, {
+    role,
     title: L.navOrders,
     active: 'orders',
     body: `${bar}${filterChips(chips)}${head}${list}
@@ -103,7 +105,7 @@ ${pager(L, { page, pageSize, total, url: (p) => q({ page: p || '' }) })}`,
 
 /* ----------------------------- order detail ----------------------------- */
 
-export function orderPage(L, locale, { order, messages, timeline, flash, theme }) {
+export function orderPage(L, locale, { order, messages, timeline, flash, theme , role = 'owner' }) {
   const day = dayOf(order.created_at);
   const docs = `<div class="actions">
 <a class="btn" href="/admin/orders/${order.id}/invoice" target="_blank">${icon('file', 17)} ${esc(L.invoice)}</a>
@@ -122,7 +124,7 @@ ${order.payment_proof
 ${section(L.timeline, card(timelineList(L, locale, timeline)))}
 ${section(`${L.conversation} — ${order.customer.name || order.customer.phone}`, card(chat(L, messages)))}
 ${liveUpdates(L)}`;
-  return layout(L, { title: order.reference, active: 'orders', body, flash, theme });
+  return layout(L, { role, title: order.reference, active: 'orders', body, flash, theme });
 }
 
 const TIMELINE_ICON = {
@@ -179,9 +181,13 @@ ${inner}</main>${autoPrint ? '' : ''}</body></html>`;
  */
 export function invoicePage(L, locale, { order, shop, qrSvg, verifyUrl }) {
   const lines = order.items
-    .map((it) => `<tr><td>${productLabel(it, locale)}</td><td>${esc(L.sizes[it.size] || it.size)}</td>
+    .map((it) => {
+      const extras = extrasName(it);
+      return `<tr><td>${productLabel(it, locale)}${extras ? `<br><span class="muted">${esc(extras)}</span>` : ''}</td>
+<td>${esc(variantName(L, it))}</td>
 <td class="num tabnum">${it.quantity}</td><td class="num tabnum">${esc(money(locale, it.unit_price))}</td>
-<td class="num tabnum">${esc(money(locale, it.line_total))}</td></tr>`)
+<td class="num tabnum">${esc(money(locale, it.line_total))}</td></tr>`;
+    })
     .join('');
 
   const totalRow = (label, value, cls = '') =>
@@ -201,6 +207,7 @@ export function invoicePage(L, locale, { order, shop, qrSvg, verifyUrl }) {
     <div class="muted">+${esc(order.customer.phone)}</div>
     <div class="muted">${esc(order.neighborhood || '')}${order.address_note ? `<br>${esc(order.address_note)}` : ''}</div></div>
   <div><div class="doc__label">${esc(L.statusLabel)}</div>${statusBadge(L, order.status)}
+    ${order.slot_label ? `<div class="doc__label" style="margin-top:.75rem">${esc(L.slotLabel)}</div>${esc(order.slot_label)}` : ''}
     <div class="doc__label" style="margin-top:.75rem">${esc(L.payment)}</div>
     ${esc(order.payment_method === 'cash' ? L.payCash : L.payMomo)}</div>
   <div><div class="doc__label">${esc(L.shopContact)}</div>
@@ -229,8 +236,12 @@ ${totalRow(L.total, money(locale, order.total), 'doc__total--grand')}
 /** Compact ticket for whoever prepares the bag. No prices, just what to pack. */
 export function ticketPage(L, locale, { order, shop }) {
   const lines = order.items
-    .map((it) => `<tr><td style="font-size:1.05rem">${productLabel(it, locale)}</td>
-<td>${esc(L.sizes[it.size] || it.size)}</td><td class="num" style="font-size:1.25rem;font-weight:700">× ${it.quantity}</td></tr>`)
+    .map((it) => {
+      const extras = extrasName(it);
+      return `<tr><td style="font-size:1.05rem">${productLabel(it, locale)}
+${extras ? `<br><span class="muted">${esc(extras)}</span>` : ''}</td>
+<td>${esc(variantName(L, it))}</td><td class="num" style="font-size:1.25rem;font-weight:700">× ${it.quantity}</td></tr>`;
+    })
     .join('');
   const inner = `<article class="doc" style="max-width:26rem">
 <header class="doc__head" style="margin-bottom:1rem">
@@ -242,6 +253,7 @@ export function ticketPage(L, locale, { order, shop }) {
 <dt>${esc(L.zone)}</dt><dd>${esc(order.neighborhood || '—')}</dd>
 <dt>${esc(L.phone)}</dt><dd>+${esc(order.customer.phone)}</dd>
 <dt>${esc(L.payment)}</dt><dd>${esc(order.payment_method === 'cash' ? `${L.payCash} — ${money(locale, order.total)}` : L.payMomo)}</dd>
+${order.slot_label ? `<dt>${esc(L.slotLabel)}</dt><dd>${esc(order.slot_label)}</dd>` : ''}
 </div>
 ${table([L.product, L.size, { label: L.qty, num: true }], lines)}
 ${order.address_note ? `<p style="margin-top:1rem"><b class="strong">${esc(L.address)} :</b> ${esc(order.address_note)}</p>` : ''}
@@ -250,7 +262,7 @@ ${order.address_note ? `<p style="margin-top:1rem"><b class="strong">${esc(L.add
 }
 
 /** The day's picking list: what to buy and pack, grouped by product and size. */
-export function picklistPage(L, locale, { day, shopping, orders, shop }) {
+export function picklistPage(L, locale, { day, shopping, orders, shop , role = 'owner' }) {
   const inner = `<article class="doc">
 <header class="doc__head"><div><div class="doc__brand">🌶️ ${esc(shop.name)}</div>
 <div class="strong">${esc(L.shoppingList)} — ${esc(day)}</div>
@@ -260,7 +272,7 @@ ${quantitiesTable(L, locale, shopping, 'qty', L.noOrders)}
 ${orders.length
     ? table([L.reference, L.customers, L.zone, L.items],
       orders.map((o) => `<tr><td>${esc(o.reference)}</td><td>${esc(o.customer_name || '')}</td><td>${esc(o.neighborhood || '')}</td>
-<td>${o.items.map((it) => `${esc(locale === 'en' ? it.name_en : it.name_fr)} ${esc(L.sizes[it.size])}×${it.quantity}`).join(', ')}</td></tr>`).join(''))
+<td>${o.items.map((it) => `${esc(locale === 'en' ? it.name_en : it.name_fr)} ${esc(variantName(L, it))}×${it.quantity}`).join(', ')}</td></tr>`).join(''))
     : empty(L.noOrders, 'receipt')}
 <footer class="doc__foot">${esc(new Date().toLocaleString(locale === 'en' ? 'en-GB' : 'fr-FR'))}</footer></article>`;
   return printableShell(L, `${L.shoppingList} ${day}`, inner);
@@ -269,7 +281,7 @@ ${orders.length
 /* --------------------------- public verification ------------------------ */
 
 /** The page the invoice QR code opens. No login, no personal data beyond a first name. */
-export function verifyPage(L, locale, { order, shop, valid }) {
+export function verifyPage(L, locale, { order, shop, valid , role = 'owner' }) {
   const body = valid
     ? `<div class="verify"><div class="verify__mark badge--success">${icon('shield', 32)}</div>
 <h1>${esc(L.invoiceValid)}</h1>

@@ -7,6 +7,9 @@ const SETTINGS_TABS = (L) => [
   ['payment', '/admin/settings?tab=payment', L.paymentSection, 'wallet'],
   ['alerts', '/admin/settings?tab=alerts', L.alertsSection, 'bell'],
   ['loyalty', '/admin/settings?tab=loyalty', L.tabLoyaltyRules, 'gift'],
+  ['tiers', '/admin/settings?tab=tiers', L.tabTiers, 'star'],
+  ['catalogue', '/admin/settings?tab=catalogue', L.tabCatalogue, 'package'],
+  ['accounting', '/admin/settings?tab=accounting', L.navAccounting, 'file'],
   ['system', '/admin/settings?tab=system', L.tabSystem, 'shield'],
 ];
 
@@ -16,7 +19,7 @@ const form = (L, tab, inner) => `<form method="post" action="/admin/settings">
 <div class="actions" style="margin-top:1.25rem"><button class="btn btn--primary">${icon('check', 17)} ${esc(L.save)}</button></div></form>`;
 
 export function settingsPage(L, locale, data) {
-  const { shop, smtpReady, tab = 'shop', system = {}, flash, flashTone, theme } = data;
+  const { shop, smtpReady, tab = 'shop', system = {}, flash, flashTone, theme, role = 'owner' } = data;
 
   const panels = {
     shop: form(L, 'shop', card(`<div class="form-grid">
@@ -79,6 +82,34 @@ ${smtpReady
 <div class="field"><label for="s-ref">${esc(L.referralReward)}</label><input id="s-ref" type="number" name="referralReward" min="0" value="${shop.referralReward}"></div>
 </div><p class="form-note">${esc(L.loyaltyHint)}</p>`, { head: `${icon('gift')}<h2>${esc(L.tabLoyaltyRules)}</h2>` })),
 
+    tiers: form(L, 'tiers', card(`<div class="form-grid">
+<div class="field"><label for="t-so">${esc(L.tierSilverOrders)}</label><input id="t-so" type="number" name="tierSilverOrders" min="0" value="${shop.tierSilverOrders}"></div>
+<div class="field"><label for="t-sd">${esc(L.tierSilverDelivery)}</label><input id="t-sd" type="number" name="tierSilverDelivery" min="0" max="100" value="${shop.tierSilverDelivery}"></div>
+<div class="field"><label for="t-go">${esc(L.tierGoldOrders)}</label><input id="t-go" type="number" name="tierGoldOrders" min="0" value="${shop.tierGoldOrders}"></div>
+<div class="field"><label for="t-gd">${esc(L.tierGoldDelivery)}</label><input id="t-gd" type="number" name="tierGoldDelivery" min="0" max="100" value="${shop.tierGoldDelivery}"></div>
+</div><p class="form-note">${esc(L.tiersHint)}</p>
+<hr>
+<label class="switch"><input type="checkbox" name="winbackEnabled" value="1"${shop.winbackEnabled ? ' checked' : ''}>
+<span class="strong">${esc(L.winbackEnabled)}</span></label>
+<div class="form-grid" style="margin-top:.75rem">
+<div class="field"><label for="w-days">${esc(L.winbackDays)}</label><input id="w-days" type="number" name="winbackDays" min="7" value="${shop.winbackDays}"></div>
+<div class="field"><label for="w-amount">${esc(L.winbackDiscount)}</label><input id="w-amount" type="number" name="winbackDiscount" min="0" value="${shop.winbackDiscount}"></div>
+</div><p class="form-note">${esc(L.winbackHint)}</p>`, { head: `${icon('star')}<h2>${esc(L.tabTiers)}</h2>` })),
+
+    catalogue: form(L, 'catalogue', card(`<label class="switch">
+<input type="checkbox" name="catalogEnabled" value="1"${shop.catalogEnabled ? ' checked' : ''}>
+<span class="strong">${esc(L.catalogEnabled)}</span></label>
+<div class="field" style="margin-top:.75rem"><label for="c-id">${esc(L.catalogId)}</label>
+<input id="c-id" name="catalogId" value="${esc(shop.catalogId)}" inputmode="numeric" placeholder="1234567890"></div>
+<p class="form-note">${esc(L.catalogHint)}</p>`, { head: `${icon('package')}<h2>${esc(L.tabCatalogue)}</h2>` })),
+
+    accounting: form(L, 'accounting', card(`<div class="form-grid">
+<div class="field"><label for="ac-vat">${esc(L.vatRate)}</label><input id="ac-vat" type="number" name="vatRate" min="0" max="100" value="${shop.vatRate}"></div>
+<div class="field"><label for="ac-id">${esc(L.businessId)}</label><input id="ac-id" name="businessId" value="${esc(shop.businessId)}" maxlength="40"></div>
+</div><p class="form-note">${esc(L.vatHint)}</p>
+<div class="actions" style="margin-top:.75rem"><a class="btn" href="/admin/accounting">${icon('file', 17)} ${esc(L.ledgerTitle)}</a></div>`,
+    { head: `${icon('file')}<h2>${esc(L.navAccounting)}</h2>` })),
+
     system: card(`<dl class="kv">
 <dt>${esc(L.version)}</dt><dd>${esc(system.version || '—')}</dd>
 <dt>Node</dt><dd>${esc(system.node || '—')}</dd>
@@ -88,6 +119,8 @@ ${smtpReady
 <dt>${esc(L.timezone)}</dt><dd>${esc(system.tz || '—')}</dd>
 <dt>${esc(L.whatsappStatus)}</dt><dd>${system.waReady ? badge(L.configured, 'success', { dot: true }) : badge(L.notConfigured, 'danger')}</dd>
 <dt>${esc(L.aiStatus)}</dt><dd>${system.aiReady ? badge(L.configured, 'success', { dot: true }) : badge(L.notConfigured, 'gray')}</dd>
+<dt>${esc(L.sttStatus)}</dt><dd>${system.sttReady ? badge(L.configured, 'success', { dot: true }) : badge(L.notConfigured, 'gray')}</dd>
+<dt>${esc(L.tabCatalogue)}</dt><dd>${system.catalogReady ? badge(L.configured, 'success', { dot: true }) : badge(L.notConfigured, 'gray')}</dd>
 </dl><hr>
 <div class="actions">
 <a class="btn" href="/admin/backup">${icon('download', 17)} ${esc(L.downloadBackup)}</a>
@@ -96,5 +129,5 @@ ${smtpReady
   };
 
   const body = `${tabs(SETTINGS_TABS(L), tab)}${panels[tab] || panels.shop}`;
-  return layout(L, { title: L.settings, active: 'settings', body, flash, flashTone, theme });
+  return layout(L, { role, title: L.settings, active: 'settings', body, flash, flashTone, theme });
 }

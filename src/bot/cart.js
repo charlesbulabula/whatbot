@@ -1,22 +1,31 @@
 import { config } from '../config.js';
 import { getProduct } from '../db/index.js';
-import { t, productName } from '../i18n/index.js';
+import { productName } from '../i18n/index.js';
+import { variantOf, variantLabel, extrasTotal, extrasLabel } from '../shop/catalogue.js';
 
-export const SIZES = ['small', 'medium', 'large'];
 const MAX_QTY_PER_LINE = 50;
 
-export const priceOf = (product, size) => product[`price_${size}`];
+/** Price of one unit: the variant, plus whatever extras were picked for that line. */
+export const priceOf = (product, size, extras = []) => (variantOf(product, size)?.price ?? 0) + extrasTotal(extras);
 
-/** Adds an item, merging with an existing line for the same product and size. */
-export function addItem(cart, productId, size, qty) {
-  const line = cart.find((i) => i.productId === productId && i.size === size);
+/** Two lines merge only when the product, the variant and the extras all match. */
+const sameLine = (a, productId, size, extras) =>
+  a.productId === productId && a.size === size && extrasKey(a.extras) === extrasKey(extras);
+
+const extrasKey = (extras = []) => (extras || []).map((e) => e.id ?? e.label).sort().join('|');
+
+/** Adds an item, merging with an existing identical line. */
+export function addItem(cart, productId, size, qty, extras = []) {
+  const line = cart.find((i) => sameLine(i, productId, size, extras));
   if (line) line.qty = Math.min(line.qty + qty, MAX_QTY_PER_LINE);
-  else cart.push({ productId, size, qty });
+  else cart.push({ productId, size, qty, ...(extras.length ? { extras } : {}) });
   return cart;
 }
 
-export function removeItem(cart, productId, size) {
-  return cart.filter((i) => !(i.productId === productId && i.size === size));
+export function removeItem(cart, productId, size, extras) {
+  return cart.filter((i) => !(extras === undefined
+    ? i.productId === productId && i.size === size
+    : sameLine(i, productId, size, extras)));
 }
 
 /** Resolves a cart against the live catalogue: current prices, and items that went out of stock. */
@@ -25,12 +34,16 @@ export function priceCart(cart) {
   const unavailable = [];
   for (const item of cart) {
     const product = getProduct(item.productId);
-    if (!product || !product.in_stock) {
+    const variant = product && variantOf(product, item.size);
+    // A variant that was deleted or switched off makes the line unorderable,
+    // exactly like a product that went out of stock.
+    if (!product || !product.in_stock || !variant || !variant.active) {
       unavailable.push({ ...item, product });
       continue;
     }
-    const unitPrice = priceOf(product, item.size);
-    lines.push({ ...item, product, unitPrice, lineTotal: unitPrice * item.qty });
+    const extras = item.extras || [];
+    const unitPrice = variant.price + extrasTotal(extras);
+    lines.push({ ...item, extras, product, variant, unitPrice, lineTotal: unitPrice * item.qty });
   }
   return { lines, unavailable, subtotal: lines.reduce((sum, l) => sum + l.lineTotal, 0) };
 }
@@ -49,22 +62,46 @@ export function computeTotals(subtotal, availableCredit, { deliveryFee, couponDi
   return { subtotal, deliveryFee: fee, couponDiscount: coupon, discount, total: afterCoupon - discount };
 }
 
-/** Rebuilds a cart from a past order, keeping only products that are still in stock. */
+/** Rebuilds a cart from a past order, keeping only what can still be ordered. */
 export function fromOrder(order) {
   const items = [];
   const missing = [];
   for (const it of order?.items || []) {
     const product = getProduct(it.product_id);
-    if (product?.in_stock) addItem(items, product.id, it.size, it.quantity);
-    else if (product && !missing.some((p) => p.id === product.id)) missing.push(product);
+    const variant = product && variantOf(product, it.size);
+    if (product?.in_stock && variant?.active) {
+      let extras = [];
+      try {
+        extras = it.extras ? JSON.parse(it.extras) : [];
+      } catch {
+        extras = [];
+      }
+      addItem(items, product.id, it.size, it.quantity, extras);
+    } else if (product && !missing.some((p) => p.id === product.id)) {
+      missing.push(product);
+    }
   }
   return { items, missing };
 }
 
-export function describeItem(locale, product, size, qty) {
-  return `${productName(product, locale)} — ${t(locale, `sizes.${size}`)} × ${qty}`;
+/**
+ * Variant name for a cart line or for a past order line.
+ * An order_items row carries the label it was sold with and points at its
+ * product through product_id, so it must not be treated as a product itself.
+ */
+function labelOf(locale, productLike, size) {
+  if (productLike?.variant_label) return productLike.variant_label;
+  const product = productLike?.product_id ? getProduct(productLike.product_id) : productLike;
+  return variantLabel(variantOf(product, size), locale);
 }
 
+/** "🍅 Tomate — Moyen tas (préparé) × 2" */
+export function describeItem(locale, product, size, qty, extras = []) {
+  const add = extrasLabel(extras.map((e) => ({ label: e.label })));
+  return `${productName(product, locale)} — ${labelOf(locale, product, size)}${add ? ` (${add})` : ''} × ${qty}`;
+}
+
+/** Compact form used in "your last order was…" lines. */
 export function shortItem(locale, product, size, qty) {
-  return `${productName(product, locale)} ${t(locale, `sizesShort.${size}`)} ×${qty}`;
+  return `${productName(product, locale)} ${labelOf(locale, product, size)} ×${qty}`;
 }

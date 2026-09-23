@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS customers (
   address_note      TEXT,
   locale            TEXT NOT NULL DEFAULT 'fr',
   segment           TEXT NOT NULL DEFAULT 'new',     -- new | regular | vip
+  tier              TEXT NOT NULL DEFAULT 'bronze',  -- bronze | silver | gold
   orders_count      INTEGER NOT NULL DEFAULT 0,      -- paid orders only
   total_spent       INTEGER NOT NULL DEFAULT 0,
   credit            INTEGER NOT NULL DEFAULT 0,      -- loyalty + referral balance, spent at checkout
@@ -25,6 +26,8 @@ CREATE TABLE IF NOT EXISTS products (
   name_fr           TEXT NOT NULL,
   name_en           TEXT NOT NULL,
   emoji             TEXT NOT NULL DEFAULT '',
+  photo             TEXT,                            -- file name under data/media/products
+  retailer_id       TEXT,                            -- id in the Meta product catalog
   price_small       INTEGER NOT NULL,
   price_medium      INTEGER NOT NULL,
   price_large       INTEGER NOT NULL,
@@ -59,6 +62,8 @@ CREATE TABLE IF NOT EXISTS orders (
   payment_proof     TEXT,                            -- WhatsApp media id of the screenshot
   payment_proof_file TEXT,                           -- local copy (Meta media links expire)
   eta               TEXT,
+  slot_id           INTEGER REFERENCES delivery_slots(id) ON DELETE SET NULL,
+  slot_label        TEXT,                            -- copied so history survives a slot rename
   rating            INTEGER,
   created_at        TEXT NOT NULL DEFAULT (datetime('now')),
   paid_at           TEXT,
@@ -70,7 +75,9 @@ CREATE TABLE IF NOT EXISTS order_items (
   id                INTEGER PRIMARY KEY AUTOINCREMENT,
   order_id          INTEGER NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
   product_id        INTEGER NOT NULL REFERENCES products(id),
-  size              TEXT NOT NULL,                   -- small | medium | large
+  size              TEXT NOT NULL,                   -- the variant sku
+  variant_label     TEXT,                            -- copied at order time
+  extras            TEXT,                            -- JSON [{label, price}]
   quantity          INTEGER NOT NULL DEFAULT 1,
   unit_price        INTEGER NOT NULL,
   line_total        INTEGER NOT NULL
@@ -169,3 +176,95 @@ CREATE INDEX IF NOT EXISTS idx_notes_customer   ON customer_notes(customer_id, c
 CREATE INDEX IF NOT EXISTS idx_credit_customer  ON credit_entries(customer_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_audit_created    ON audit_log(created_at);
 CREATE INDEX IF NOT EXISTS idx_expenses_day     ON expenses(day);
+
+/* ----------------------------- staff accounts ---------------------------- */
+-- Named logins with a role, so the dashboard is no longer one shared password.
+-- The ADMIN_USER / ADMIN_PASSWORD pair from .env stays valid as the owner.
+CREATE TABLE IF NOT EXISTS staff (
+  id                INTEGER PRIMARY KEY AUTOINCREMENT,
+  username          TEXT NOT NULL UNIQUE,
+  name              TEXT,
+  role              TEXT NOT NULL DEFAULT 'seller',  -- owner | seller | rider
+  password_hash     TEXT NOT NULL,                   -- scrypt: salt:hash
+  active            INTEGER NOT NULL DEFAULT 1,
+  created_at        TEXT NOT NULL DEFAULT (datetime('now')),
+  last_login_at     TEXT
+);
+
+/* ---------------------------- product variants --------------------------- */
+-- Replaces the fixed small/medium/large sizes: a product can be sold by heap,
+-- by bunch, by kilo... The three default variants keep the sku of the old sizes
+-- so past orders and their history stay readable.
+CREATE TABLE IF NOT EXISTS product_variants (
+  id                INTEGER PRIMARY KEY AUTOINCREMENT,
+  product_id        INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+  sku               TEXT NOT NULL,                   -- small | medium | large | free text
+  label_fr          TEXT NOT NULL,
+  label_en          TEXT NOT NULL,
+  label_ln          TEXT,
+  price             INTEGER NOT NULL DEFAULT 0,
+  active            INTEGER NOT NULL DEFAULT 1,
+  sort_order        INTEGER NOT NULL DEFAULT 0,
+  UNIQUE (product_id, sku)
+);
+
+-- Optional add-ons offered after the quantity ("préparé", "nettoyé"...).
+CREATE TABLE IF NOT EXISTS product_extras (
+  id                INTEGER PRIMARY KEY AUTOINCREMENT,
+  product_id        INTEGER REFERENCES products(id) ON DELETE CASCADE, -- NULL = offered on every product
+  label_fr          TEXT NOT NULL,
+  label_en          TEXT NOT NULL,
+  label_ln          TEXT,
+  price             INTEGER NOT NULL DEFAULT 0,
+  active            INTEGER NOT NULL DEFAULT 1,
+  sort_order        INTEGER NOT NULL DEFAULT 0
+);
+
+/* ---------------------------- delivery slots ----------------------------- */
+CREATE TABLE IF NOT EXISTS delivery_slots (
+  id                INTEGER PRIMARY KEY AUTOINCREMENT,
+  label_fr          TEXT NOT NULL,
+  label_en          TEXT NOT NULL,
+  label_ln          TEXT,
+  start_time        TEXT NOT NULL DEFAULT '08:00',
+  end_time          TEXT NOT NULL DEFAULT '12:00',
+  capacity          INTEGER NOT NULL DEFAULT 0,      -- 0 = unlimited
+  active            INTEGER NOT NULL DEFAULT 1,
+  sort_order        INTEGER NOT NULL DEFAULT 0
+);
+
+/* ----------------------------- subscriptions ----------------------------- */
+-- "The same basket every Saturday": the scheduler turns these into real orders.
+CREATE TABLE IF NOT EXISTS subscriptions (
+  id                INTEGER PRIMARY KEY AUTOINCREMENT,
+  customer_id       INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+  weekday           INTEGER NOT NULL,                -- 0 = Sunday … 6 = Saturday
+  items             TEXT NOT NULL DEFAULT '[]',      -- JSON cart
+  slot_id           INTEGER REFERENCES delivery_slots(id) ON DELETE SET NULL,
+  active            INTEGER NOT NULL DEFAULT 1,
+  last_run_day      TEXT,
+  created_at        TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+/* ------------------------- rider tracking & route ------------------------ */
+CREATE TABLE IF NOT EXISTS rider_positions (
+  day               TEXT PRIMARY KEY,                -- one live position per delivery day
+  latitude          REAL NOT NULL,
+  longitude         REAL NOT NULL,
+  accuracy          REAL,
+  updated_at        TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+/* ------------------------------ web push --------------------------------- */
+CREATE TABLE IF NOT EXISTS push_subscriptions (
+  id                INTEGER PRIMARY KEY AUTOINCREMENT,
+  endpoint          TEXT NOT NULL UNIQUE,
+  p256dh            TEXT NOT NULL,
+  auth              TEXT NOT NULL,
+  actor             TEXT,
+  created_at        TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_variants_product ON product_variants(product_id, sort_order);
+CREATE INDEX IF NOT EXISTS idx_subs_customer    ON subscriptions(customer_id);
+CREATE INDEX IF NOT EXISTS idx_subs_weekday     ON subscriptions(weekday, active);

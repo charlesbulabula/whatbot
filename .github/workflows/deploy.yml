@@ -7,6 +7,7 @@
 #   WA_PHONE_NUMBER_ID, WA_TOKEN, WA_APP_SECRET, WA_BUSINESS_NUMBER     (from Meta)
 #   MOMO_ORANGE, MOMO_AIRTEL, MOMO_HOLDER, ADMIN_NOTIFY_NUMBER          (shop settings)
 #   SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_FROM, ALERT_EMAIL  (optional: email alerts)
+#   STT_PROVIDER, STT_API_KEY                                           (optional: voice notes)
 #   ANTHROPIC_API_KEY                                                   (optional: free-text orders)
 #   VPS_HOST (default 72.62.238.174), repository variable DOMAIN (default bot.ll-aca.site)
 #
@@ -89,5 +90,7 @@ jobs:
           WHATBOT_SMTP_PASS: ${{ secrets.SMTP_PASS }}
           WHATBOT_SMTP_FROM: ${{ secrets.SMTP_FROM }}
           WHATBOT_ALERT_EMAIL: ${{ secrets.ALERT_EMAIL }}
+          WHATBOT_STT_PROVIDER: ${{ secrets.STT_PROVIDER }}
+          WHATBOT_STT_API_KEY: ${{ secrets.STT_API_KEY }}
           WHATBOT_ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: ./deploy/deploy.sh

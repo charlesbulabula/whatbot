@@ -47,6 +47,22 @@ function defaults() {
     loyaltyEvery: config.loyalty.every,
     loyaltyReward: config.loyalty.reward,
     referralReward: config.loyalty.referralReward,
+    // Loyalty tiers: how many paid orders to reach a tier, and how much of the
+    // delivery fee it takes off (in percent).
+    tierSilverOrders: 5,
+    tierSilverDelivery: 25,
+    tierGoldOrders: 15,
+    tierGoldDelivery: 100,
+    // Win-back: message a customer who has not ordered for this many days.
+    winbackEnabled: false,
+    winbackDays: 30,
+    winbackDiscount: 1000,
+    // Meta product catalog (Commerce Manager). Empty id = the bot's own list.
+    catalogEnabled: false,
+    catalogId: '',
+    // Accounting: the VAT rate shown on the ledger (0 = not subject to VAT).
+    vatRate: 16,
+    businessId: '', // tax / RCCM number printed on exports
     momoEnabled: true,
     cashEnabled: false, // opt-in: cash on delivery changes how the rider is briefed
     closed: false, // manual "closed now" switch, independent of the opening hours
@@ -84,6 +100,17 @@ function normalize(raw) {
     loyaltyEvery: toInt(s.loyaltyEvery),
     loyaltyReward: toInt(s.loyaltyReward),
     referralReward: toInt(s.referralReward),
+    tierSilverOrders: toInt(s.tierSilverOrders),
+    tierSilverDelivery: Math.min(100, toInt(s.tierSilverDelivery)),
+    tierGoldOrders: toInt(s.tierGoldOrders),
+    tierGoldDelivery: Math.min(100, toInt(s.tierGoldDelivery)),
+    winbackEnabled: Boolean(s.winbackEnabled),
+    winbackDays: Math.max(7, toInt(s.winbackDays) || 30),
+    winbackDiscount: toInt(s.winbackDiscount),
+    catalogEnabled: Boolean(s.catalogEnabled),
+    catalogId: String(s.catalogId || '').replace(/\D/g, '').slice(0, 30),
+    vatRate: Math.min(100, toInt(s.vatRate)),
+    businessId: String(s.businessId || '').trim().slice(0, 40),
     momoEnabled: Boolean(s.momoEnabled),
     cashEnabled: Boolean(s.cashEnabled),
     closed: Boolean(s.closed),

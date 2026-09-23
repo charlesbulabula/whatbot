@@ -1,10 +1,11 @@
 import './setup.js';
 import { handleInbound } from '../src/bot/engine.js';
 import { seedIfEmpty } from '../src/db/seed.js';
-import { db } from '../src/db/index.js';
+import { db, seedVariantsIfMissing } from '../src/db/index.js';
 import { send as sendToWhatsApp } from '../src/whatsapp/client.js';
 
 seedIfEmpty();
+seedVariantsIfMissing();
 
 let seq = 0;
 

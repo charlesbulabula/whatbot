@@ -56,12 +56,25 @@ ou mot « english »). Le tableau de bord admin suit la même règle (lien « En
 | **Journal d'activité** | Tout ce que le tableau de bord modifie est tracé (qui, quoi, quand), conservé un an. |
 | **Rapport quotidien par e-mail** | Un résumé chaque soir après la fermeture : commandes, encaissé, paiements à vérifier, à acheter pour demain. |
 | **Sauvegarde en un clic** | Un fichier SQLite complet téléchargeable depuis les réglages, en plus de la sauvegarde automatique quotidienne. |
+| **Messages vocaux compris** | Le vocal du client est transcrit puis traité comme du texte : mots-clés, boutons par leur nom, et commande en langage libre. Fournisseur au choix (`STT_PROVIDER=openai` ou `deepgram`) ; sans clé, le bot demande poliment d'utiliser les boutons. |
+| **Comptes et rôles** | Patron / Vendeur / Livreur, chacun avec son identifiant et son mot de passe (haché en scrypt). Le vendeur ne voit ni les réglages ni la comptabilité, le livreur ne voit que les commandes. Le compte du `.env` reste la porte de secours. |
+| **Créneaux de livraison** | « Ce matin », « demain après-midi », avec une capacité par créneau. Un créneau plein disparaît, un créneau qui commence dans moins d'une heure n'est plus proposé pour aujourd'hui. |
+| **Photos produits** | Envoyées au client au moment de choisir la taille, et affichées dans le tableau de bord. |
+| **Catalogue WhatsApp natif** | Avec un catalogue Meta (Commerce Manager), WhatsApp affiche les produits avec leurs vignettes et le client remplit un panier dans l'application ; le bot le reprend tel quel. |
+| **Variantes et suppléments** | Au-delà de petit/moyen/grand : botte, kilo, ce que vous voulez, avec leur prix. Et des suppléments optionnels (« préparé », « nettoyé ») proposés après la quantité. |
+| **Abonnement hebdomadaire** | « Le même panier chaque samedi » : le bot recrée la commande automatiquement et prévient le client, qui peut sauter la semaine ou arrêter. |
+| **Relance des clients inactifs** | Après N jours sans commande, un message avec un code promo **personnel**, à usage unique et valable 14 jours. |
+| **Paliers de fidélité** | Bronze / Argent / Or selon le nombre de commandes payées, avec une réduction automatique sur la livraison et un message de félicitations au passage de palier. |
+| **Tournée optimisée** | Les adresses partagées en position GPS sont ordonnées par OSRM (gratuit), avec la distance et la durée estimées ; les autres restent groupées par quartier. |
+| **Suivi livreur en direct** | Le livreur partage sa position depuis sa feuille de route ; le client reçoit un lien de suivi avec une carte, la distance et l'heure estimée. |
+| **Lingala** | Troisième langue du bot, à côté du français et de l'anglais. |
+| **Application installable (PWA)** | Le tableau de bord s'installe sur le téléphone et reçoit des notifications push à chaque nouvelle commande. |
+| **Comptabilité** | Journal de caisse (ventes et dépenses), récapitulatif mensuel, ventilation TVA et export CSV exploitable par un comptable. |
 | **Robustesse** | Captures de paiement copiées sur le serveur (les liens Meta expirent), sauvegarde quotidienne de la base (14 jours), migration automatique de la base à chaque mise à jour, blocage après 10 mauvais mots de passe admin, arrêt propre lors des redéploiements. |
 
-**Pas encore fait (phase 2 prévue dans l'architecture) :** vérification automatique du
-paiement via les API Orange Money / Airtel Money (aujourd'hui : capture d'écran vérifiée
-à la main dans l'admin), et transcription des messages vocaux (le bot demande poliment
-d'utiliser les boutons, sauf pendant une prise en main humaine).
+**Pas encore fait :** vérification automatique du paiement via les API Orange Money /
+Airtel Money (aujourd'hui : capture d'écran vérifiée à la main dans l'admin). Le reste de
+la phase 2 est en place.
 
 ## Mise en ligne
 
@@ -196,6 +209,11 @@ Coût indicatif (architecture §3.1) : ~0,004-0,005 $ par message utilitaire hor
   - **Dépenses** : saisie des achats et calcul de la marge.
   - **Diffusion** : message ciblé aux clients joignables.
   - **Journal** : tout ce qui a été modifié depuis le tableau de bord.
+  - **Créneaux** : horaires de livraison et capacité par créneau.
+  - **Abonnements** : les paniers hebdomadaires en cours.
+  - **Équipe** : comptes et rôles.
+  - **Comptabilité** : journal de caisse et export.
+  - Fiche produit : variantes, suppléments, photo et identifiant catalogue Meta.
 - **Alerte admin** : mets ton numéro perso dans `ADMIN_NOTIFY_NUMBER` pour recevoir chaque
   capture de paiement. Écris « Bonjour » au bot une fois par jour depuis ce numéro pour
   garder la fenêtre de 24 h ouverte, ou crée le modèle `admin_alert`.

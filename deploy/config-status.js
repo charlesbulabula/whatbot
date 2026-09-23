@@ -15,6 +15,8 @@ const KEYS = [
   ['ADMIN_NOTIFY_NUMBER', 'alerts — or set it in the dashboard'],
   ['SMTP_HOST', 'optional: email alerts'],
   ['SMTP_FROM', 'optional: email alerts'],
+  ['STT_PROVIDER', 'optional: voice notes'],
+  ['STT_API_KEY', 'optional: voice notes'],
   ['ANTHROPIC_API_KEY', 'optional: free-text orders'],
 ];
 

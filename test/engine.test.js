@@ -5,13 +5,32 @@ import * as db from '../src/db/index.js';
 import { changeOrderStatus } from '../src/bot/orders.js';
 import { config } from '../src/config.js';
 
-test('a new customer is greeted in French with the menu and an English option', () => {
+test('a new customer is greeted in French, with one option per other language', () => {
   const c = customer('243810000001');
   const { last } = c.say('Bonjour');
   assert.equal(last.kind, 'buttons');
   assert.match(last.body, /bienvenue chez \*Epices Test\*/);
-  assert.deepEqual(optionIds(last), ['menu:order', 'menu:lang']);
+  assert.deepEqual(optionIds(last), ['menu:order', 'menu:lang:en', 'menu:lang:ln']);
   assert.equal(last.buttons[1].title, '🇬🇧 English');
+  assert.equal(last.buttons[2].title, '🇨🇩 Lingala');
+});
+
+test('a customer can switch to Lingala and order in it', () => {
+  const c = customer('243810000030');
+  c.say('Bonjour');
+  const menu = c.tap('menu:lang:ln').last;
+  assert.match(menu.body, /nakolobaka na yo na Lingala/);
+  assert.equal(menu.buttons[0].title, '🛒 Kosomba');
+
+  c.tap('menu:order');
+  // Lingala variant names are longer, so WhatsApp gets a list rather than buttons.
+  const sizes = c.tap('p:1').last;
+  assert.match(sizes.body, /Monene nini/);
+  assert.deepEqual(optionIds(sizes), ['size:small', 'size:medium', 'size:large']);
+  assert.match(sizes.rows[0].title, /Mwa moke/);
+
+  c.tap('size:medium');
+  assert.match(c.tap('qty:1').last.body, /Ebakisami/);
 });
 
 test('full order: catalogue → size → quantity → address → recap → payment → proof', () => {
@@ -25,7 +44,7 @@ test('full order: catalogue → size → quantity → address → recap → paym
 
   const sizes = c.tap('p:1').last;
   assert.deepEqual(optionIds(sizes), ['size:small', 'size:medium', 'size:large']);
-  assert.equal(sizes.buttons[1].title, 'Moyen · 2 000 FC');
+  assert.equal(sizes.buttons[1].title, 'Moyen tas · 2 000 FC');
 
   const qty = c.tap('size:medium').last;
   assert.deepEqual(optionIds(qty), ['qty:1', 'qty:2', 'qty:3']);
@@ -84,10 +103,10 @@ test('"annuler" works at any step and cancels an unpaid order', () => {
 test('switching to English translates the conversation and is remembered', () => {
   const c = customer('243810000004');
   c.say('Bonjour');
-  const menu = c.tap('menu:lang').last;
+  const menu = c.tap('menu:lang:en').last;
   assert.match(menu.body, /Got it, I will speak English/);
   assert.equal(menu.buttons[0].title, '🛒 Order');
-  assert.equal(menu.buttons.at(-1).title, '🇫🇷 Français');
+  assert.ok(menu.buttons.some((b) => b.title === '🇫🇷 Français'));
 
   c.tap('menu:order');
   const sizes = c.tap('p:3').last;
@@ -107,7 +126,7 @@ test('a returning customer skips the address step and can repeat the last order'
 
   const menu = c.say('Bonjour').last;
   assert.match(menu.body, /Re-bonjour Mama Nzinga/);
-  assert.match(menu.body, /Votre dernière commande : 🫚 Gingembre Grand ×1/);
+  assert.match(menu.body, /Votre dernière commande : 🫚 Gingembre Grand tas ×1/);
   assert.ok(optionIds(menu).includes('menu:reorder'));
 
   const confirm = c.tap('menu:reorder').last;

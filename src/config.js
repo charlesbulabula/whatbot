@@ -74,6 +74,16 @@ export const config = {
     dailyLimitPerCustomer: int(process.env.AI_DAILY_LIMIT_PER_CUSTOMER, 30),
   },
 
+  // Speech-to-text for voice notes. Empty provider or key = feature off, and
+  // the bot keeps asking for buttons instead.
+  stt: {
+    provider: (process.env.STT_PROVIDER || '').toLowerCase(),
+    apiKey: process.env.STT_API_KEY || '',
+    model: process.env.STT_MODEL || '',
+    baseUrl: process.env.STT_BASE_URL || '',
+    language: process.env.STT_LANGUAGE || 'fr',
+  },
+
   geo: {
     // Reverse-geocode shared locations with OpenStreetMap Nominatim to detect the delivery zone.
     enabled: bool(process.env.GEOCODING_ENABLED, true) && process.env.NODE_ENV !== 'test',

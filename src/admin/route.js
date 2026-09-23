@@ -9,7 +9,8 @@ import { DEFAULT_LOCALE, money } from '../i18n/index.js';
 import { changeOrderStatus } from '../bot/orders.js';
 import { adminDictionaries } from './i18n.js';
 import { esc } from './views.js';
-import { CSS, FONT_LINK, icon } from './theme.js';
+import { CSS, FONT_LINK, FAVICON, icon } from './theme.js';
+import { optimise } from '../shop/routing.js';
 
 const TO_DELIVER = ['paid', 'preparing', 'on_the_way'];
 const MAX_AGE_DAYS = 2; // links for older days stop working
@@ -44,12 +45,22 @@ const mapsLink = (order) => {
   return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(query)}`;
 };
 
-export function riderCards(L, orders, { actionBase } = {}) {
+export function riderCards(L, orders, { actionBase, numbered = false } = {}) {
   const locale = L.lang;
   return orders
-    .map((o) => {
+    .map((o, index) => {
       const items = o.items
-        .map((it) => `<li>${esc(it.emoji)} ${esc(locale === 'en' ? it.name_en : it.name_fr)} — ${esc(L.sizes[it.size])} × ${it.quantity}</li>`)
+        .map((it) => {
+          let extras = '';
+          try {
+            extras = it.extras ? JSON.parse(it.extras).map((e) => e.label).join(', ') : '';
+          } catch {
+            extras = '';
+          }
+          const variant = it.variant_label || L.sizes[it.size] || it.size;
+          return `<li>${esc(it.emoji)} ${esc(locale === 'en' ? it.name_en : it.name_fr)} — ${esc(variant)}
+${extras ? `<span class="muted">(${esc(extras)})</span>` : ''} × ${it.quantity}</li>`;
+        })
         .join('');
       const done = o.status === 'delivered';
       const cash = o.payment_method === 'cash' && !done;
@@ -61,9 +72,10 @@ ${o.status !== 'on_the_way' ? `<form method="post" action="${actionBase}/orders/
         ? `<div class="badge badge--warning" style="font-size:.875rem">${esc(L.route.collect)} ${esc(money(locale, o.total))}</div>`
         : `<div class="muted">${esc(L.route.prepaid)} (${esc(money(locale, o.total))})</div>`;
       return `<div class="card"${done ? ' style="opacity:.55"' : ''}><div class="card__body">
-<div class="actions"><b class="strong">${esc(o.customer_name || '')}</b><span class="spacer"></span>
+<div class="actions">${numbered ? `<span class="avatar" style="width:26px;height:26px;font-size:.75rem">${index + 1}</span>` : ''}
+<b class="strong">${esc(o.customer_name || '')}</b><span class="spacer"></span>
 <span class="badge badge--${o.status === 'delivered' ? 'success' : o.status === 'on_the_way' ? 'primary' : 'info'}">${esc(L.status[o.status])}</span></div>
-<div class="muted">${esc(o.reference)}</div>
+<div class="muted">${esc(o.reference)}${o.slot_label ? ` · ${esc(o.slot_label)}` : ''}</div>
 <div>${icon('pin', 15)} <b class="strong">${esc(o.neighborhood || '')}</b> — ${esc(String(o.address_note || '').replace(/📍?\s*https?:\/\/\S+/g, '').trim())}</div>
 <ul>${items}</ul>
 ${payment}
@@ -83,23 +95,56 @@ export function ordersForRoute(day) {
   };
 }
 
-function riderPage(L, day, base, flash) {
+async function riderPage(L, day, base, flash) {
   const { pending, delivered } = ordersForRoute(day);
   const toCollect = pending
     .filter((o) => o.payment_method === 'cash')
     .reduce((sum, o) => sum + o.total, 0);
+  // Stops that were shared as a location are sequenced by OSRM; the rest keep
+  // their area grouping, which is what a rider would do anyway.
+  const position = db.getRiderPosition(day);
+  const route = await optimise(pending, {
+    day,
+    start: position ? { latitude: position.latitude, longitude: position.longitude } : null,
+  });
+  const ordered = route.orders;
+  const summary = route.optimised && route.distanceKm !== null
+    ? `<div class="alert">${icon('scooter')}<span>${esc(L.route.optimised(route.distanceKm, route.durationMin))}</span></div>`
+    : '';
   return `<!doctype html><html lang="${L.lang}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex"><meta name="color-scheme" content="light dark">
-<title>${esc(L.route.title)} ${esc(day)}</title>${FONT_LINK}<style>${CSS}
+<title>${esc(L.route.title)} ${esc(day)}</title>${FAVICON}${FONT_LINK}<style>${CSS}
 .hk-page{margin:0;padding:1.25rem;max-width:640px;margin-inline:auto}</style></head><body>
 <main class="hk-page">
 <h1>${icon('scooter', 24)} ${esc(L.route.title)} — ${esc(day)}</h1>
 ${flash ? `<div class="alert" style="margin-top:1rem">${icon('info')}<span>${esc(flash)}</span></div>` : ''}
 ${toCollect ? `<div class="alert alert--warning" style="margin-top:1rem">${icon('wallet')}<span>${esc(L.route.collectTotal)} <b>${esc(money(L.lang, toCollect))}</b></span></div>` : ''}
-<section class="section"><div class="section__title"><h2>${esc(L.route.toDeliver)} (${pending.length})</h2></div>
-${pending.length ? riderCards(L, pending, { actionBase: base }) : `<div class="card"><div class="card__body"><p class="muted">${esc(L.route.empty)}</p></div></div>`}</section>
+${summary}
+${shareButton(L, base, position)}
+<section class="section"><div class="section__title"><h2>${esc(L.route.toDeliver)} (${ordered.length})</h2></div>
+${ordered.length ? riderCards(L, ordered, { actionBase: base, numbered: true }) : `<div class="card"><div class="card__body"><p class="muted">${esc(L.route.empty)}</p></div></div>`}</section>
 ${delivered.length ? `<section class="section"><div class="section__title"><h2>${esc(L.route.delivered)} (${delivered.length})</h2></div>${riderCards(L, delivered)}</section>` : ''}
 </main></body></html>`;
+}
+
+/** Lets the rider broadcast their position from the phone, with one tap. */
+function shareButton(L, base, position) {
+  const since = position ? new Date(`${position.updated_at.replace(' ', 'T')}Z`).toLocaleTimeString(L.lang === 'en' ? 'en-GB' : 'fr-FR', { hour: '2-digit', minute: '2-digit' }) : null;
+  return `<div class="card" style="margin-top:1rem"><div class="card__body">
+<div class="actions"><button class="btn btn--primary" id="share-pos">${icon('pin', 17)} ${esc(L.route.sharePosition)}</button>
+<span class="muted" id="share-state">${since ? esc(L.route.positionAt(since)) : esc(L.route.positionOff)}</span></div>
+<p class="form-note">${esc(L.route.positionHint)}</p></div></div>
+<script>(function(){
+var btn=document.getElementById('share-pos'),state=document.getElementById('share-state'),watch=null;
+if(!navigator.geolocation){btn.disabled=true;return;}
+function send(p){fetch(${JSON.stringify(`${base}/position`)},{method:'POST',headers:{'Content-Type':'application/json'},
+ body:JSON.stringify({latitude:p.coords.latitude,longitude:p.coords.longitude,accuracy:p.coords.accuracy})})
+ .then(function(){state.textContent=${JSON.stringify(L.route.positionSharing)}}).catch(function(){});}
+btn.addEventListener('click',function(){
+ if(watch!==null){navigator.geolocation.clearWatch(watch);watch=null;state.textContent=${JSON.stringify(L.route.positionOff)};return;}
+ watch=navigator.geolocation.watchPosition(send,function(){state.textContent=${JSON.stringify(L.route.positionDenied)}},
+  {enableHighAccuracy:true,maximumAge:15000,timeout:20000});});
+})();</script>`;
 }
 
 export const routeRouter = express.Router();
@@ -110,12 +155,28 @@ routeRouter.use((req, res, next) => {
   next();
 });
 routeRouter.use(express.urlencoded({ extended: false, limit: '4kb' }));
+routeRouter.use(express.json({ limit: '4kb' }));
 
-routeRouter.get('/:day/:token', (req, res) => {
+routeRouter.get('/:day/:token', async (req, res, next) => {
   const L = adminDictionaries[DEFAULT_LOCALE];
   const { day, token } = req.params;
   if (!validLink(day, token)) return res.status(404).send(esc(L.route.expired));
-  res.send(riderPage(L, day, `/route/${day}/${token}`, req.query.flash));
+  try {
+    res.send(await riderPage(L, day, `/route/${day}/${token}`, req.query.flash));
+  } catch (err) {
+    next(err);
+  }
+});
+
+/** The rider's live position, shared from the route sheet. */
+routeRouter.post('/:day/:token/position', (req, res) => {
+  const { day, token } = req.params;
+  if (!validLink(day, token)) return res.status(404).json({ ok: false });
+  const latitude = Number(req.body?.latitude);
+  const longitude = Number(req.body?.longitude);
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return res.status(400).json({ ok: false });
+  db.setRiderPosition(day, { latitude, longitude, accuracy: Number(req.body?.accuracy) || null });
+  res.json({ ok: true });
 });
 
 routeRouter.post('/:day/:token/orders/:id', async (req, res) => {

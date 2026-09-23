@@ -15,3 +15,19 @@ bus.setMaxListeners(0); // one listener per open dashboard tab
 export function publish(type, data = {}) {
   bus.emit('update', { type, ...data, at: Date.now() });
 }
+
+/**
+ * Push handler, installed by the app at boot. Kept as a hook so this module
+ * stays dependency-free and the tests can run without a push stack.
+ */
+let pushHandler = null;
+
+export function onPush(handler) {
+  pushHandler = handler;
+}
+
+/** Fire-and-forget: a failed notification must never break an order. */
+export function notifyDevices(payload) {
+  if (!pushHandler) return;
+  Promise.resolve(pushHandler(payload)).catch(() => {});
+}

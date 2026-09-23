@@ -1,14 +1,19 @@
 import { pathToFileURL } from 'node:url';
 import express from 'express';
 import { config, assertConfig } from './config.js';
+import * as settings from './shop/settings.js';
 import { logger } from './utils/logger.js';
 import { seedIfEmpty } from './db/seed.js';
-import { db, ping, seedZonesIfEmpty } from './db/index.js';
+import { db, ping, seedZonesIfEmpty, seedVariantsIfMissing } from './db/index.js';
 import { webhookRouter } from './whatsapp/webhook.js';
 import { adminRouter } from './admin/router.js';
 import { routeRouter } from './admin/route.js';
 import { legalRouter } from './legal.js';
 import { verifyRouter } from './verify.js';
+import { mediaRouter } from './media.js';
+import { trackingRouter } from './tracking.js';
+import { pwaRouter, push } from './pwa.js';
+import { bus, onPush, notifyDevices } from './utils/events.js';
 import { startScheduler } from './jobs/scheduler.js';
 
 const missing = assertConfig();
@@ -20,6 +25,18 @@ if (seeded) logger.info(`Seeded ${seeded} starter products`);
 // DELIVERY_ZONES / DELIVERY_FEE only seed the areas table; the dashboard owns it afterwards.
 const seededZones = seedZonesIfEmpty(config.shop.zones, config.shop.deliveryFee);
 if (seededZones) logger.info(`Seeded ${seededZones} delivery areas`);
+
+// Products created before variants existed keep their three heap sizes.
+const seededVariants = seedVariantsIfMissing();
+if (seededVariants) logger.info(`Seeded ${seededVariants} product variants`);
+
+// Ring the installed dashboards on the events that need a person.
+onPush(push);
+bus.on('update', (event) => {
+  const shop = settings.get();
+  if (event.type === 'order') notifyDevices({ title: shop.name, body: `🧾 ${event.reference || ''}`, url: '/admin' });
+  if (event.type === 'handoff') notifyDevices({ title: shop.name, body: '🙋', url: '/admin/customers' });
+});
 
 export const app = express();
 app.disable('x-powered-by');
@@ -47,6 +64,9 @@ app.use(webhookRouter);
 app.use('/admin', adminRouter);
 app.use('/route', routeRouter);
 app.use('/v', verifyRouter);
+app.use('/media', mediaRouter);
+app.use('/t', trackingRouter);
+app.use(pwaRouter); // /manifest.webmanifest, /sw.js, /icon.svg
 app.use(legalRouter);
 app.get('/', (_req, res) => res.redirect('/admin'));
 

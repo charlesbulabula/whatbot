@@ -8,3 +8,4 @@ export { customersPage, customerPage } from './pages/customers.js';
 export { statsPage } from './pages/stats.js';
 export { settingsPage } from './pages/settings.js';
 export { loyaltyPage, expensesPage, auditPage, broadcastPage, searchPage } from './pages/ops.js';
+export { slotsPage, staffPage, subscriptionsPage, accountingPage, productPage } from './pages/shop.js';

@@ -1,8 +1,11 @@
 import { config } from '../config.js';
 import fr from './fr.js';
 import en from './en.js';
+import ln from './ln.js';
 
-const dictionaries = { fr, en };
+// Lingala only carries the customer-facing copy; anything else falls back to the
+// default locale, which is the language the shop owner reads anyway.
+const dictionaries = { fr, en, ln };
 
 export const LOCALES = Object.keys(dictionaries).filter((l) => config.i18n.available.includes(l));
 export const DEFAULT_LOCALE = LOCALES.includes(config.i18n.defaultLocale) ? config.i18n.defaultLocale : 'fr';

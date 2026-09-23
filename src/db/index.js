@@ -25,6 +25,13 @@ const ADDED_COLUMNS = [
   ['customers', 'blocked', 'INTEGER NOT NULL DEFAULT 0'],
   ['products', 'stock_qty', 'INTEGER'],
   ['products', 'stock_alert', 'INTEGER NOT NULL DEFAULT 0'],
+  ['products', 'photo', 'TEXT'],
+  ['products', 'retailer_id', 'TEXT'],
+  ['customers', 'tier', "TEXT NOT NULL DEFAULT 'bronze'"],
+  ['orders', 'slot_id', 'INTEGER'],
+  ['orders', 'slot_label', 'TEXT'],
+  ['order_items', 'variant_label', 'TEXT'],
+  ['order_items', 'extras', 'TEXT'],
 ];
 for (const [table, column, type] of ADDED_COLUMNS) {
   const exists = db.prepare(`SELECT 1 FROM pragma_table_info(?) WHERE name = ?`).get(table, column);
@@ -69,7 +76,7 @@ export function touchCustomer(phone) {
 
 const CUSTOMER_FIELDS = [
   'name', 'neighborhood', 'address_note', 'locale', 'marketing_opt_out', 'waitlist_since', 'referred_by',
-  'tags', 'blocked',
+  'tags', 'blocked', 'tier',
 ];
 
 export function updateCustomer(id, fields) {
@@ -151,7 +158,7 @@ export function createProduct(p) {
 
 const PRODUCT_FIELDS = [
   'name_fr', 'name_en', 'emoji', 'price_small', 'price_medium', 'price_large',
-  'in_stock', 'sort_order', 'stock_qty', 'stock_alert',
+  'in_stock', 'sort_order', 'stock_qty', 'stock_alert', 'photo', 'retailer_id',
 ];
 
 export function updateProduct(id, p) {
@@ -212,7 +219,7 @@ export function idleConversations(states, olderThanMinutes, { reminded } = {}) {
 
 export function createOrder({
   customer, items, subtotal, deliveryFee, discount, total, name, neighborhood, addressNote,
-  paymentMethod = 'momo', coupon = null, couponDiscount = 0,
+  paymentMethod = 'momo', coupon = null, couponDiscount = 0, slotId = null, slotLabel = null,
 }) {
   const tx = db.transaction(() => {
     // Next number after the highest reference already issued today: unique by construction,
@@ -226,16 +233,22 @@ export function createOrder({
     const info = db
       .prepare(
         `INSERT INTO orders (reference, customer_id, subtotal, delivery_fee, discount, coupon, coupon_discount,
-                             total, payment_method, customer_name, neighborhood, address_note)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                             total, payment_method, customer_name, neighborhood, address_note, slot_id, slot_label)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(reference, customer.id, subtotal, deliveryFee, discount, coupon?.code || null, couponDiscount,
-           total, paymentMethod, name, neighborhood, addressNote);
+           total, paymentMethod, name, neighborhood, addressNote, slotId, slotLabel);
     const insertItem = db.prepare(
-      `INSERT INTO order_items (order_id, product_id, size, quantity, unit_price, line_total) VALUES (?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO order_items (order_id, product_id, size, variant_label, extras, quantity, unit_price, line_total)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     );
     for (const it of items) {
-      insertItem.run(info.lastInsertRowid, it.productId, it.size, it.quantity, it.unitPrice, it.unitPrice * it.quantity);
+      insertItem.run(
+        info.lastInsertRowid, it.productId, it.size,
+        it.variantLabel || null,
+        it.extras?.length ? JSON.stringify(it.extras) : null,
+        it.quantity, it.unitPrice, it.unitPrice * it.quantity,
+      );
     }
     if (discount > 0) {
       db.prepare(`INSERT INTO credit_entries (customer_id, amount, reason, order_id) VALUES (?, ?, 'order', ?)`)
@@ -391,7 +404,8 @@ export function revenueSince(modifier) {
 export function shoppingList(day) {
   return db
     .prepare(
-      `SELECT p.id AS product_id, p.name_fr, p.name_en, p.emoji, oi.size, SUM(oi.quantity) AS qty
+      `SELECT p.id AS product_id, p.name_fr, p.name_en, p.emoji, oi.size,
+              MAX(oi.variant_label) AS variant_label, SUM(oi.quantity) AS qty
          FROM order_items oi
          JOIN orders o ON o.id = oi.order_id
          JOIN products p ON p.id = oi.product_id
@@ -406,7 +420,7 @@ export function shoppingList(day) {
 export function demandForecast() {
   return db
     .prepare(
-      `SELECT p.id AS product_id, p.name_fr, p.name_en, p.emoji, oi.size,
+      `SELECT p.id AS product_id, p.name_fr, p.name_en, p.emoji, oi.size, MAX(oi.variant_label) AS variant_label,
               ROUND(SUM(oi.quantity) / 4.0, 1) AS weekly_avg
          FROM order_items oi
          JOIN orders o ON o.id = oi.order_id
@@ -1072,4 +1086,350 @@ export function recentCreditEntries(limit = 40) {
 export function getOrderByReference(reference) {
   const row = db.prepare('SELECT id FROM orders WHERE reference = ?').get(reference);
   return row ? getOrder(row.id) : null;
+}
+
+/* --------------------------- product variants --------------------------- */
+// A product is sold in one or more variants (heap sizes, a bunch, a kilo...).
+// The first three of every product keep the skus of the old fixed sizes, so
+// past orders, the shopping list and the statistics all still line up.
+
+export const DEFAULT_VARIANTS = [
+  { sku: 'small', label_fr: 'Petit tas', label_en: 'Small', label_ln: 'Mwa moke', column: 'price_small' },
+  { sku: 'medium', label_fr: 'Moyen tas', label_en: 'Medium', label_ln: 'Mwa ya kati', column: 'price_medium' },
+  { sku: 'large', label_fr: 'Grand tas', label_en: 'Large', label_ln: 'Mwa monene', column: 'price_large' },
+];
+
+export function listVariants(productId, { onlyActive = true } = {}) {
+  const where = onlyActive ? 'AND active = 1' : '';
+  return db.prepare(`SELECT * FROM product_variants WHERE product_id = ? ${where} ORDER BY sort_order, id`).all(productId);
+}
+
+export function getVariant(productId, sku) {
+  return db.prepare('SELECT * FROM product_variants WHERE product_id = ? AND sku = ?').get(productId, sku);
+}
+
+export function createVariant(v) {
+  const info = db
+    .prepare(
+      `INSERT INTO product_variants (product_id, sku, label_fr, label_en, label_ln, price, active, sort_order)
+       VALUES (@product_id, @sku, @label_fr, @label_en, @label_ln, @price, @active, @sort_order)`,
+    )
+    .run({ label_ln: null, active: 1, sort_order: 0, price: 0, ...v });
+  return db.prepare('SELECT * FROM product_variants WHERE id = ?').get(info.lastInsertRowid);
+}
+
+const VARIANT_FIELDS = ['sku', 'label_fr', 'label_en', 'label_ln', 'price', 'active', 'sort_order'];
+
+export function updateVariant(id, fields) {
+  const keys = VARIANT_FIELDS.filter((k) => fields[k] !== undefined);
+  if (!keys.length) return null;
+  db.prepare(`UPDATE product_variants SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`)
+    .run(...keys.map((k) => fields[k]), id);
+  return db.prepare('SELECT * FROM product_variants WHERE id = ?').get(id);
+}
+
+export function deleteVariant(id) {
+  db.prepare('DELETE FROM product_variants WHERE id = ?').run(id);
+}
+
+/**
+ * Gives every product without variants the three heap sizes it used to have.
+ * Runs on boot; a product whose variants were edited is left alone.
+ */
+export function seedVariantsIfMissing() {
+  const products = db.prepare('SELECT * FROM products').all();
+  let created = 0;
+  for (const p of products) {
+    if (db.prepare('SELECT 1 FROM product_variants WHERE product_id = ? LIMIT 1').get(p.id)) continue;
+    DEFAULT_VARIANTS.forEach((v, i) => {
+      createVariant({
+        product_id: p.id,
+        sku: v.sku,
+        label_fr: v.label_fr,
+        label_en: v.label_en,
+        label_ln: v.label_ln,
+        price: p[v.column] || 0,
+        sort_order: i + 1,
+      });
+      created += 1;
+    });
+  }
+  return created;
+}
+
+/* ---------------------------- product extras ---------------------------- */
+
+export function listExtras(productId = null, { onlyActive = true } = {}) {
+  const active = onlyActive ? 'AND active = 1' : '';
+  return db
+    .prepare(`SELECT * FROM product_extras WHERE (product_id IS NULL OR product_id = ?) ${active} ORDER BY sort_order, id`)
+    .all(productId);
+}
+
+export function allExtras() {
+  return db.prepare('SELECT * FROM product_extras ORDER BY sort_order, id').all();
+}
+
+export function createExtra(e) {
+  const info = db
+    .prepare(
+      `INSERT INTO product_extras (product_id, label_fr, label_en, label_ln, price, active, sort_order)
+       VALUES (@product_id, @label_fr, @label_en, @label_ln, @price, @active, @sort_order)`,
+    )
+    .run({ product_id: null, label_ln: null, active: 1, sort_order: 0, price: 0, ...e });
+  return db.prepare('SELECT * FROM product_extras WHERE id = ?').get(info.lastInsertRowid);
+}
+
+const EXTRA_FIELDS = ['product_id', 'label_fr', 'label_en', 'label_ln', 'price', 'active', 'sort_order'];
+
+export function updateExtra(id, fields) {
+  const keys = EXTRA_FIELDS.filter((k) => fields[k] !== undefined);
+  if (!keys.length) return null;
+  db.prepare(`UPDATE product_extras SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`)
+    .run(...keys.map((k) => fields[k]), id);
+  return db.prepare('SELECT * FROM product_extras WHERE id = ?').get(id);
+}
+
+export function deleteExtra(id) {
+  db.prepare('DELETE FROM product_extras WHERE id = ?').run(id);
+}
+
+/* ---------------------------- delivery slots ---------------------------- */
+// Time windows the customer picks at checkout ("ce matin", "demain après-midi").
+// A slot with a capacity stops being offered once that many orders are taken.
+
+export function listSlots({ onlyActive = false } = {}) {
+  const where = onlyActive ? 'WHERE active = 1' : '';
+  return db.prepare(`SELECT * FROM delivery_slots ${where} ORDER BY sort_order, start_time`).all();
+}
+
+export function getSlot(id) {
+  return db.prepare('SELECT * FROM delivery_slots WHERE id = ?').get(id);
+}
+
+export function createSlot(s) {
+  const info = db
+    .prepare(
+      `INSERT INTO delivery_slots (label_fr, label_en, label_ln, start_time, end_time, capacity, active, sort_order)
+       VALUES (@label_fr, @label_en, @label_ln, @start_time, @end_time, @capacity, @active, @sort_order)`,
+    )
+    .run({ label_ln: null, capacity: 0, active: 1, sort_order: 0, start_time: '08:00', end_time: '12:00', ...s });
+  return getSlot(info.lastInsertRowid);
+}
+
+const SLOT_FIELDS = ['label_fr', 'label_en', 'label_ln', 'start_time', 'end_time', 'capacity', 'active', 'sort_order'];
+
+export function updateSlot(id, fields) {
+  const keys = SLOT_FIELDS.filter((k) => fields[k] !== undefined);
+  if (!keys.length) return getSlot(id);
+  db.prepare(`UPDATE delivery_slots SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`)
+    .run(...keys.map((k) => fields[k]), id);
+  return getSlot(id);
+}
+
+export function deleteSlot(id) {
+  db.prepare('DELETE FROM delivery_slots WHERE id = ?').run(id);
+}
+
+/** Orders already booked into a slot on a given delivery day. */
+export function slotBookings(day, slotId) {
+  return db
+    .prepare(`SELECT COUNT(*) AS n FROM orders WHERE slot_id = ? AND ${LOCAL_DAY} = ? AND status != 'cancelled'`)
+    .get(slotId, day).n;
+}
+
+/** How many orders are booked per slot on a day, for the dashboard. */
+export function slotLoad(day) {
+  return db
+    .prepare(
+      `SELECT slot_id, slot_label, COUNT(*) AS n FROM orders
+        WHERE ${LOCAL_DAY} = ? AND status != 'cancelled' AND slot_id IS NOT NULL
+        GROUP BY slot_id, slot_label ORDER BY slot_id`,
+    )
+    .all(day);
+}
+
+/* ----------------------------- subscriptions ---------------------------- */
+// "The same basket every Saturday": the scheduler turns an active subscription
+// into a real order on its weekday, then messages the customer.
+
+export function listSubscriptions({ onlyActive = false } = {}) {
+  const where = onlyActive ? 'WHERE s.active = 1' : '';
+  return db
+    .prepare(
+      `SELECT s.*, c.name AS customer_name, c.phone, c.locale
+         FROM subscriptions s JOIN customers c ON c.id = s.customer_id ${where}
+        ORDER BY s.weekday, s.id`,
+    )
+    .all();
+}
+
+export function subscriptionsFor(customerId) {
+  return db.prepare('SELECT * FROM subscriptions WHERE customer_id = ? ORDER BY id').all(customerId);
+}
+
+export function getSubscription(id) {
+  return db.prepare('SELECT * FROM subscriptions WHERE id = ?').get(id);
+}
+
+export function createSubscription({ customerId, weekday, items, slotId = null }) {
+  const info = db
+    .prepare('INSERT INTO subscriptions (customer_id, weekday, items, slot_id) VALUES (?, ?, ?, ?)')
+    .run(customerId, weekday, JSON.stringify(items || []), slotId);
+  return getSubscription(info.lastInsertRowid);
+}
+
+export function updateSubscription(id, fields) {
+  const keys = ['weekday', 'items', 'slot_id', 'active', 'last_run_day'].filter((k) => fields[k] !== undefined);
+  if (!keys.length) return getSubscription(id);
+  db.prepare(`UPDATE subscriptions SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`)
+    .run(...keys.map((k) => fields[k]), id);
+  return getSubscription(id);
+}
+
+export function deleteSubscription(id) {
+  db.prepare('DELETE FROM subscriptions WHERE id = ?').run(id);
+}
+
+/** Subscriptions due on `weekday` that have not produced an order today. */
+export function subscriptionsDue(weekday, day) {
+  return db
+    .prepare(
+      `SELECT s.*, c.name AS customer_name, c.phone, c.locale, c.blocked, c.neighborhood, c.address_note
+         FROM subscriptions s JOIN customers c ON c.id = s.customer_id
+        WHERE s.active = 1 AND s.weekday = ? AND (s.last_run_day IS NULL OR s.last_run_day != ?)
+          AND c.blocked = 0`,
+    )
+    .all(weekday, day);
+}
+
+/* ------------------------- inactive customers --------------------------- */
+
+/** Customers who have not ordered for `days`, are reachable and still opted in. */
+export function inactiveCustomers(days, { limit = 50 } = {}) {
+  return db
+    .prepare(
+      `SELECT c.* FROM customers c
+        WHERE c.marketing_opt_out = 0 AND c.blocked = 0 AND c.orders_count > 0
+          AND NOT EXISTS (
+            SELECT 1 FROM orders o
+             WHERE o.customer_id = c.id AND o.created_at >= datetime('now', ?)
+          )
+        ORDER BY c.total_spent DESC LIMIT ?`,
+    )
+    .all(`-${days} days`, limit);
+}
+
+/* ------------------------------- staff ---------------------------------- */
+
+export function listStaff() {
+  return db.prepare('SELECT * FROM staff ORDER BY role, username').all();
+}
+
+export function getStaff(id) {
+  return db.prepare('SELECT * FROM staff WHERE id = ?').get(id);
+}
+
+export function getStaffByUsername(username) {
+  return db.prepare('SELECT * FROM staff WHERE username = ?').get(username);
+}
+
+export function createStaff(s) {
+  const info = db
+    .prepare('INSERT INTO staff (username, name, role, password_hash) VALUES (@username, @name, @role, @password_hash)')
+    .run(s);
+  return getStaff(info.lastInsertRowid);
+}
+
+export function updateStaff(id, fields) {
+  const keys = ['username', 'name', 'role', 'password_hash', 'active'].filter((k) => fields[k] !== undefined);
+  if (!keys.length) return getStaff(id);
+  db.prepare(`UPDATE staff SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`).run(...keys.map((k) => fields[k]), id);
+  return getStaff(id);
+}
+
+export function deleteStaff(id) {
+  db.prepare('DELETE FROM staff WHERE id = ?').run(id);
+}
+
+export function touchStaffLogin(id) {
+  db.prepare("UPDATE staff SET last_login_at = datetime('now') WHERE id = ?").run(id);
+}
+
+/* ---------------------------- rider position ---------------------------- */
+// One live position per delivery day: the rider shares it from the route sheet,
+// and the customer's tracking page reads it.
+
+export function setRiderPosition(day, { latitude, longitude, accuracy = null }) {
+  db.prepare(
+    `INSERT INTO rider_positions (day, latitude, longitude, accuracy, updated_at)
+     VALUES (?, ?, ?, ?, datetime('now'))
+     ON CONFLICT(day) DO UPDATE SET latitude = excluded.latitude, longitude = excluded.longitude,
+       accuracy = excluded.accuracy, updated_at = datetime('now')`,
+  ).run(day, latitude, longitude, accuracy);
+}
+
+export function getRiderPosition(day) {
+  return db.prepare('SELECT * FROM rider_positions WHERE day = ?').get(day);
+}
+
+/* -------------------------- push subscriptions -------------------------- */
+
+export function listPushSubscriptions() {
+  return db.prepare('SELECT * FROM push_subscriptions').all();
+}
+
+export function savePushSubscription({ endpoint, p256dh, auth, actor }) {
+  db.prepare(
+    `INSERT INTO push_subscriptions (endpoint, p256dh, auth, actor) VALUES (?, ?, ?, ?)
+     ON CONFLICT(endpoint) DO UPDATE SET p256dh = excluded.p256dh, auth = excluded.auth, actor = excluded.actor`,
+  ).run(endpoint, p256dh, auth, actor || null);
+}
+
+export function deletePushSubscription(endpoint) {
+  db.prepare('DELETE FROM push_subscriptions WHERE endpoint = ?').run(endpoint);
+}
+
+/* ---------------------------- accounting -------------------------------- */
+// The cash book: every money movement in one chronological list, so the figures
+// can be handed to an accountant without re-keying anything.
+
+export function cashBook(fromDay, toDay) {
+  const income = db
+    .prepare(
+      `SELECT ${LOCAL_DAY} AS day, 'order' AS kind, reference AS ref, customer_name AS label,
+              payment_method AS method, total AS amount, paid_at
+         FROM orders
+        WHERE status IN (${PAID_SQL}) AND ${LOCAL_DAY} BETWEEN ? AND ?`,
+    )
+    .all(fromDay, toDay);
+  const spending = db
+    .prepare(
+      `SELECT day, 'expense' AS kind, CAST(id AS TEXT) AS ref, COALESCE(label, category) AS label,
+              category AS method, -amount AS amount, created_at AS paid_at
+         FROM expenses WHERE day BETWEEN ? AND ?`,
+    )
+    .all(fromDay, toDay);
+  return [...income, ...spending].sort((a, b) => String(a.day).localeCompare(String(b.day)) || a.kind.localeCompare(b.kind));
+}
+
+/** Month-by-month totals, the shape an accountant actually asks for. */
+export function monthlyLedger(fromDay, toDay) {
+  const rows = db
+    .prepare(
+      `SELECT strftime('%Y-%m', ${LOCAL_DAY}) AS month,
+              COUNT(*) AS orders, COALESCE(SUM(total), 0) AS revenue,
+              COALESCE(SUM(CASE WHEN payment_method = 'cash' THEN total ELSE 0 END), 0) AS cash,
+              COALESCE(SUM(CASE WHEN payment_method = 'momo' THEN total ELSE 0 END), 0) AS momo,
+              COALESCE(SUM(delivery_fee), 0) AS delivery,
+              COALESCE(SUM(coupon_discount + discount), 0) AS discounts
+         FROM orders WHERE status IN (${PAID_SQL}) AND ${LOCAL_DAY} BETWEEN ? AND ?
+        GROUP BY month ORDER BY month`,
+    )
+    .all(fromDay, toDay);
+  const costs = db
+    .prepare("SELECT strftime('%Y-%m', day) AS month, COALESCE(SUM(amount), 0) AS expenses FROM expenses WHERE day BETWEEN ? AND ? GROUP BY month")
+    .all(fromDay, toDay);
+  const byMonth = new Map(costs.map((c) => [c.month, c.expenses]));
+  return rows.map((r) => ({ ...r, expenses: byMonth.get(r.month) || 0, margin: r.revenue - (byMonth.get(r.month) || 0) }));
 }

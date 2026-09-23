@@ -217,4 +217,73 @@ export default {
   reportShopping: 'À acheter / préparer :',
   reportNothing: 'rien pour aujourd’hui',
 
+
+  /* --------------------------- variants & extras ------------------------ */
+  pickExtras: 'Souhaitez-vous un supplément ?',
+  btnExtrasChoose: 'Voir les suppléments',
+  btnExtrasDone: '✅ C’est bon',
+  btnExtrasNone: 'Non merci',
+  extrasChosen: (p) => `Suppléments : ${p.items}`,
+
+  /* ---------------------------- WhatsApp catalog ------------------------ */
+  catalogHeader: 'Notre catalogue',
+  catalogBody: 'Choisissez vos produits, ajoutez-les au panier, puis envoyez-le nous.',
+  catalogFooter: 'Tapez « menu » pour revenir',
+  cartReceived: 'Panier bien reçu 👍',
+
+
+  /* --------------------------- delivery slots -------------------------- */
+  askSlot: 'Quand souhaitez-vous être livré ?',
+  slotButton: 'Choisir un créneau',
+  slotWhen: { today: 'Aujourd’hui', tomorrow: 'Demain' },
+  slotLeft: (p) => `${p.n} place${p.n > 1 ? 's' : ''} restante${p.n > 1 ? 's' : ''}`,
+  slotFull: 'Ce créneau vient d’être complet 🙏 Choisissez-en un autre.',
+  deliverySlotLine: (p) => `🕒 Créneau : *${p.slot}*`,
+
+
+  /* ---------------------------- loyalty tiers -------------------------- */
+  tiers: { bronze: 'Bronze', silver: 'Argent', gold: 'Or' },
+  tierReached: (p) => `🎉 Félicitations, vous passez au palier *${p.tier}* !\n${p.perk}`,
+  tierPerkFree: 'Votre livraison est désormais offerte sur chaque commande.',
+  tierPerkOff: (p) => `Vous avez ${p.pct} % de réduction sur la livraison.`,
+  tierFreeDelivery: (p) => `🎁 Livraison offerte (palier ${p.tier})`,
+  tierDeliveryOff: (p) => `🎁 −${p.pct} % sur la livraison (palier ${p.tier})`,
+
+  /* ---------------------------- subscriptions -------------------------- */
+  btnSubscribe: '🔄 Abonnement',
+  askSubscribeDay: 'Quel jour souhaitez-vous être livré chaque semaine ?',
+  subscribeButton: 'Choisir le jour',
+  subscribeNoOrder: 'Passez d’abord une commande : votre abonnement reprendra ce panier.',
+  subscribeConfirm: (p) => `Chaque *${p.day}*, je préparerai : ${p.items}\nC’est bon ?`,
+  btnSubscribeYes: '✅ Oui, m’abonner',
+  btnSubscribeNo: 'Non merci',
+  subscribed: (p) => `🔄 C’est noté ! Chaque *${p.day}*, votre panier sera préparé automatiquement.\nTapez *stop abonnement* pour arrêter quand vous voulez.`,
+  subscriptionExists: (p) => `Vous avez déjà un abonnement le *${p.day}*. Il a été mis à jour.`,
+  subscriptionCancelled: 'Votre abonnement est arrêté. Vous pouvez en recréer un quand vous voulez.',
+  subscriptionNone: 'Vous n’avez pas d’abonnement en cours.',
+  subscriptionOrder: (p) =>
+    `🔄 Votre panier d’abonnement est prêt : *${p.ref}*\n${p.items}\nTotal : *${p.total}*\n` +
+    `Répondez *annuler* si vous ne voulez pas de livraison cette semaine.`,
+  weekdayNames: { 0: 'dimanche', 1: 'lundi', 2: 'mardi', 3: 'mercredi', 4: 'jeudi', 5: 'vendredi', 6: 'samedi' },
+
+  /* ------------------------------ win-back ----------------------------- */
+  winback: (p) =>
+    `Bonjour${p.name ? ` ${p.name}` : ''} 👋 Cela fait un moment !\n` +
+    `Voici *${p.amount}* de réduction avec le code *${p.code}*, valable ${p.days} jours.\nTapez *menu* pour commander.`,
+
+  adminSubscriptionOrder: (p) => `🔄 Commande d'abonnement créée\n${p.ref} — ${p.total}\n${p.name}, ${p.zone}\n${p.url}`,
+
+
+  /* ---------------------------- delivery tracking ---------------------- */
+  trackTitle: 'Suivi de livraison',
+  trackOrder: (p) => `Commande ${p.ref}`,
+  trackDelivered: 'Commande livrée. Merci !',
+  trackAddress: 'Quartier',
+  trackSlot: 'Créneau',
+  trackEta: 'Heure estimée',
+  trackAway: 'Votre livreur est à environ {km} km.',
+  trackNoPosition: 'Le livreur n’a pas encore partagé sa position.',
+  trackUnknown: 'Lien de suivi invalide.',
+  trackLink: (p) => `📍 Suivez votre livreur en direct : ${p.url}`,
+
 };

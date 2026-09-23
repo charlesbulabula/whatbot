@@ -13,6 +13,10 @@ import * as M from './messages.js';
 import * as cart from './cart.js';
 import * as settings from '../shop/settings.js';
 import * as coupons from '../shop/coupons.js';
+import * as catalogue from '../shop/catalogue.js';
+import * as slots from '../shop/slots.js';
+import * as loyalty from '../shop/loyalty.js';
+import * as waCatalog from '../shop/wa-catalog.js';
 import { rewardsAfterPayment, notifyAdmin, notifyAdminProof, storeProof } from './orders.js';
 import { publish } from '../utils/events.js';
 
@@ -24,12 +28,16 @@ export const STATES = Object.freeze({
   PICK_PRODUCT: 'PICK_PRODUCT',
   PICK_SIZE: 'PICK_SIZE',
   PICK_QTY: 'PICK_QTY',
+  PICK_EXTRAS: 'PICK_EXTRAS',
   ADD_MORE: 'ADD_MORE',
   EDIT_CART: 'EDIT_CART',
   CONFIRM_ADDRESS: 'CONFIRM_ADDRESS',
   ASK_NAME: 'ASK_NAME',
   ASK_ZONE: 'ASK_ZONE',
   ASK_ADDRESS: 'ASK_ADDRESS',
+  PICK_SLOT: 'PICK_SLOT',
+  SUBSCRIBE_DAY: 'SUBSCRIBE_DAY',
+  SUBSCRIBE_CONFIRM: 'SUBSCRIBE_CONFIRM',
   ASK_COUPON: 'ASK_COUPON',
   RECAP: 'RECAP',
   PICK_PAYMENT: 'PICK_PAYMENT',
@@ -47,12 +55,14 @@ export const REMINDABLE_STATES = [
   STATES.PICK_PRODUCT,
   STATES.PICK_SIZE,
   STATES.PICK_QTY,
+  STATES.PICK_EXTRAS,
   STATES.ADD_MORE,
   STATES.EDIT_CART,
   STATES.CONFIRM_ADDRESS,
   STATES.ASK_NAME,
   STATES.ASK_ZONE,
   STATES.ASK_ADDRESS,
+  STATES.PICK_SLOT,
   STATES.ASK_COUPON,
   STATES.RECAP,
   STATES.PICK_PAYMENT,
@@ -85,6 +95,8 @@ const KEYWORDS = {
   optOut: words('stop', 'desabonner', 'desinscrire', 'unsubscribe'),
   optIn: words('abonner', 'subscribe'),
   human: words('agent', 'humain', 'human', 'conseiller', 'operateur', 'support', 'parler a quelqu un', 'talk to someone'),
+  subscribe: words('abonnement', 'abonner moi', 'subscription', 'subscribe me'),
+  unsubscribe: words('stop abonnement', 'arreter abonnement', 'annuler abonnement', 'stop subscription', 'cancel subscription'),
   yes: words('oui', 'yes', 'o', 'y', 'ok', 'd accord', 'daccord'),
   no: words('non', 'no', 'n'),
 };
@@ -125,6 +137,7 @@ function loadSession(msg) {
 function toInput(msg) {
   return {
     type: msg.type,
+    cart: msg.order || null,
     replyId: msg.replyId || null,
     raw: String(msg.text || '').trim(),
     // Keywords and free-text matching only apply to typed text, never to button titles.
@@ -137,6 +150,9 @@ function toInput(msg) {
 }
 
 function describeInbound(msg) {
+  // A transcribed voice note is logged as what was said, marked as voice so the
+  // dashboard shows where the words came from.
+  if (msg.transcript) return `🎤 ${msg.transcript}`;
   if (msg.type === 'interactive') return `[${msg.text}]`;
   if (msg.type === 'location') return `📍 ${msg.location?.latitude},${msg.location?.longitude}`;
   if (msg.mediaId) return `(${msg.type}) ${msg.text || ''}`.trim();
@@ -174,6 +190,7 @@ function route(s, input) {
   const human = s.state === STATES.HUMAN;
   if (input.type === 'audio' && !human) return reprompt(s, tr(s, 'voiceNotSupported'));
   if (input.type === 'unsupported' && !human) return reprompt(s, tr(s, 'unsupportedMessage'));
+  if (input.cart) return receiveCatalogCart(s, input.cart);
   if (input.norm && handleKeyword(s, input)) return;
   if (s.state !== STATES.AWAIT_PROOF && attachLateProof(s, input)) return;
   HANDLERS[s.state].handle(s, input);
@@ -250,7 +267,8 @@ function setLocale(s, locale) {
   s.customer = db.updateCustomer(s.customer.id, { locale: s.locale });
 }
 
-const otherLocale = (s) => LOCALES.find((l) => l !== s.locale);
+const otherLocales = (s) => LOCALES.filter((l) => l !== s.locale);
+const otherLocale = (s) => otherLocales(s)[0];
 
 /** Served areas, from the `zones` table; DELIVERY_ZONES only seeds it on a fresh install. */
 function servedZones() {
@@ -262,10 +280,11 @@ const zoneNames = () => servedZones().map((z) => z.name);
 
 const isServedZone = (zone) => servedZones().some((z) => normalize(z.name) === normalize(zone));
 
-/** Delivery fee of an area, falling back to the shop-wide default. */
-function deliveryFeeFor(zoneName) {
+/** Delivery fee of an area, minus whatever the customer's loyalty tier takes off. */
+function deliveryFeeFor(zoneName, customer = null) {
   const zone = servedZones().find((z) => normalize(z.name) === normalize(zoneName));
-  return zone ? zone.fee : settings.get().defaultDeliveryFee;
+  const fee = zone ? zone.fee : settings.get().defaultDeliveryFee;
+  return customer ? loyalty.deliveryFeeFor(customer.tier, fee) : fee;
 }
 
 /**
@@ -274,7 +293,7 @@ function deliveryFeeFor(zoneName) {
  * expired) is dropped silently rather than blocking the order.
  */
 function priceFor(s, priced, availableCredit) {
-  const deliveryFee = deliveryFeeFor(s.ctx.delivery?.zone);
+  const deliveryFee = deliveryFeeFor(s.ctx.delivery?.zone, s.customer);
   let applied = null;
   if (s.ctx.coupon) {
     const result = coupons.evaluate(s.ctx.coupon, { customer: s.customer, subtotal: priced.subtotal, deliveryFee });
@@ -293,7 +312,7 @@ function cartText(s) {
   if (!lines.length) return tr(s, 'cartEmpty');
   return [
     tr(s, 'cartTitle'),
-    ...lines.map((l) => `• ${cart.describeItem(s.locale, l.product, l.size, l.qty)} — ${fmt(s, l.lineTotal)}`),
+    ...lines.map((l) => `• ${cart.describeItem(s.locale, l.product, l.size, l.qty, l.extras)} — ${fmt(s, l.lineTotal)}`),
     tr(s, 'subtotalLine', { amount: fmt(s, subtotal) }),
   ].join('\n');
 }
@@ -362,6 +381,16 @@ function handleKeyword(s, input) {
   if (KEYWORDS.optIn.has(k)) {
     s.customer = db.updateCustomer(s.customer.id, { marketing_opt_out: 0 });
     say(s, tr(s, 'optedIn'));
+    return true;
+  }
+  if (KEYWORDS.unsubscribe.has(k)) {
+    const active = db.subscriptionsFor(s.customer.id).filter((sub) => sub.active);
+    active.forEach((sub) => db.updateSubscription(sub.id, { active: 0 }));
+    say(s, tr(s, active.length ? 'subscriptionCancelled' : 'subscriptionNone'));
+    return true;
+  }
+  if (KEYWORDS.subscribe.has(k)) {
+    go(s, STATES.SUBSCRIBE_DAY);
     return true;
   }
   if (KEYWORDS.human.has(k) && s.state !== STATES.HUMAN) {
@@ -479,6 +508,57 @@ function startUnderstoodOrder(s, nlu) {
   return startOrder(s);
 }
 
+/** "de 1 000 FC à 3 500 FC", from the product's actual variants. */
+function priceRangeLabel(s, product) {
+  const { from, to } = catalogue.priceRange(product);
+  return from === to ? fmt(s, from) : tr(s, 'priceRange', { from: fmt(s, from), to: fmt(s, to) });
+}
+
+/** "Livraison offerte (palier Or)" when the tier changed the fee. */
+function tierPerk(s, totals) {
+  const pct = loyalty.deliveryDiscountPct(s.customer.tier);
+  if (!pct || !s.ctx.delivery) return null;
+  const full = servedZones().find((z) => normalize(z.name) === normalize(s.ctx.delivery.zone))?.fee
+    ?? settings.get().defaultDeliveryFee;
+  if (full <= totals.deliveryFee) return null;
+  return totals.deliveryFee === 0
+    ? tr(s, 'tierFreeDelivery', { tier: tr(s, `tiers.${s.customer.tier}`) })
+    : tr(s, 'tierDeliveryOff', { tier: tr(s, `tiers.${s.customer.tier}`), pct });
+}
+
+/** A cart built inside WhatsApp from the Meta catalog. */
+function receiveCatalogCart(s, order) {
+  const { items, unknown } = waCatalog.cartFromOrderMessage(order);
+  if (!items.length) return reprompt(s, tr(s, 'cartEmpty'));
+  s.ctx.cart = s.ctx.cart || [];
+  for (const it of items) cart.addItem(s.ctx.cart, it.productId, it.size, it.qty);
+  const missed = unknown.length ? tr(s, 'itemsRemovedOOS', { items: unknown.join(', ') }) : null;
+  goCheckout(s, join(tr(s, 'cartReceived'), missed, cartText(s)));
+}
+
+/** Asks for a delivery window, or goes straight to the recap when none are defined. */
+function goSlot(s, intro) {
+  if (s.ctx.slot || !slots.available().length) return go(s, STATES.RECAP, intro);
+  return go(s, STATES.PICK_SLOT, intro);
+}
+
+/** Commits the line being built (product, variant, quantity, extras) to the cart. */
+function addPending(s) {
+  const { productId, size, qty, extras = [] } = s.ctx.pending || {};
+  const product = db.getProduct(productId);
+  delete s.ctx.pending;
+  if (!product?.in_stock) {
+    return go(s, STATES.PICK_PRODUCT, tr(s, 'outOfStock', { product: product ? productName(product, s.locale) : '?' }));
+  }
+  s.ctx.cart = cart.addItem(s.ctx.cart || [], product.id, size, qty, extras);
+  go(s, STATES.ADD_MORE, tr(s, 'added', { item: cart.describeItem(s.locale, product, size, qty, extras) }));
+}
+
+/** Public URL of a product photo, used for the picture the bot sends. */
+function productPhotoUrl(product) {
+  return `${config.publicUrl}/media/products/${encodeURIComponent(product.photo)}`;
+}
+
 function goCheckout(s, intro) {
   // Check the minimum before asking for a name and an address, not after.
   const minOrder = settings.get().minOrder;
@@ -509,7 +589,14 @@ function confirmOrder(s) {
   const paymentMethod = s.ctx.payment === 'cash' ? 'cash' : 'momo';
   const order = db.createOrder({
     customer,
-    items: priced.lines.map((l) => ({ productId: l.productId, size: l.size, quantity: l.qty, unitPrice: l.unitPrice })),
+    items: priced.lines.map((l) => ({
+      productId: l.productId,
+      size: l.size,
+      variantLabel: catalogue.variantLabel(l.variant, s.locale),
+      extras: l.extras,
+      quantity: l.qty,
+      unitPrice: l.unitPrice,
+    })),
     ...totals,
     paymentMethod,
     coupon,
@@ -517,6 +604,8 @@ function confirmOrder(s) {
     name: d.name,
     neighborhood: d.zone,
     addressNote: d.note,
+    slotId: s.ctx.slot?.id || null,
+    slotLabel: s.ctx.slot?.label || null,
   });
   s.customer = db.getCustomerById(customer.id);
   publish('order', { reference: order.reference });
@@ -588,9 +677,11 @@ function attachLateProof(s, input) {
 
 function menuOptions(s) {
   const options = [{ id: 'menu:order', title: tr(s, 'btnOrder') }];
-  if (db.lastOrder(s.customer.id)) options.push({ id: 'menu:reorder', title: tr(s, 'btnReorder') });
-  const other = otherLocale(s);
-  if (other) options.push({ id: 'menu:lang', title: t(other, 'localeLabel') });
+  if (db.lastOrder(s.customer.id)) {
+    options.push({ id: 'menu:reorder', title: tr(s, 'btnReorder') });
+    options.push({ id: 'menu:subscribe', title: tr(s, 'btnSubscribe') });
+  }
+  for (const other of otherLocales(s)) options.push({ id: `menu:lang:${other}`, title: t(other, 'localeLabel') });
   return options;
 }
 
@@ -635,14 +726,63 @@ const HANDLERS = {
       const id = pick(s, input);
       if (id === 'menu:order') return startOrder(s);
       if (id === 'menu:reorder') return startOrder(s, { reorder: true });
-      if (id === 'menu:lang') {
-        setLocale(s, otherLocale(s));
+      if (id === 'menu:subscribe') return go(s, STATES.SUBSCRIBE_DAY);
+      if (id?.startsWith('menu:lang')) {
+        // "menu:lang" (one other language) or "menu:lang:<code>" (several).
+        const target = id.split(':')[2] || otherLocales(s)[0];
+        if (target) setLocale(s, target);
         return reprompt(s, tr(s, 'languageSet'));
       }
       if (input.nlu) return startUnderstoodOrder(s, input.nlu);
       const referral = applyReferral(s, input.raw);
       if (referral) return reprompt(s, referral);
       reprompt(s, tr(s, 'invalidChoice'));
+    },
+  },
+
+  // "Le même panier chaque samedi": the day first, then a confirmation of the
+  // basket that will be repeated (the customer's last order).
+  [STATES.SUBSCRIBE_DAY]: {
+    enter(s, intro) {
+      const last = db.lastOrder(s.customer.id);
+      if (!last) return greetAndMenu(s, join(intro, tr(s, 'subscribeNoOrder')));
+      const options = [1, 2, 3, 4, 5, 6, 0].map((d) => ({ id: `subday:${d}`, title: tr(s, `weekdayNames.${d}`) }));
+      offer(s, join(intro, tr(s, 'askSubscribeDay')), options, { buttonLabel: tr(s, 'subscribeButton') });
+    },
+    handle(s, input) {
+      const id = pick(s, input);
+      if (!id?.startsWith('subday:')) return reprompt(s, tr(s, 'invalidChoice'));
+      s.ctx.subDay = Number(id.slice(7));
+      go(s, STATES.SUBSCRIBE_CONFIRM);
+    },
+  },
+
+  [STATES.SUBSCRIBE_CONFIRM]: {
+    enter(s, intro) {
+      const last = db.lastOrder(s.customer.id);
+      const { items } = cart.fromOrder(last);
+      if (!items.length) return greetAndMenu(s, join(intro, tr(s, 'subscribeNoOrder')));
+      s.ctx.subItems = items;
+      const summary = items
+        .map((it) => cart.shortItem(s.locale, db.getProduct(it.productId), it.size, it.qty))
+        .join(', ');
+      offer(s, join(intro, tr(s, 'subscribeConfirm', { day: tr(s, `weekdayNames.${s.ctx.subDay}`), items: summary })), [
+        { id: 'sub:yes', title: tr(s, 'btnSubscribeYes') },
+        { id: 'sub:no', title: tr(s, 'btnSubscribeNo') },
+      ]);
+    },
+    handle(s, input) {
+      const id = pick(s, input) || (isYes(input) ? 'sub:yes' : isNo(input) ? 'sub:no' : null);
+      if (id === 'sub:no') return greetAndMenu(s, tr(s, 'okNoProblem'));
+      if (id !== 'sub:yes') return reprompt(s, tr(s, 'invalidChoice'));
+
+      const day = s.ctx.subDay;
+      const items = s.ctx.subItems || [];
+      const existing = db.subscriptionsFor(s.customer.id).find((sub) => sub.active);
+      if (existing) db.updateSubscription(existing.id, { weekday: day, items: JSON.stringify(items), active: 1 });
+      else db.createSubscription({ customerId: s.customer.id, weekday: day, items });
+      const label = tr(s, `weekdayNames.${day}`);
+      greetAndMenu(s, tr(s, existing ? 'subscriptionExists' : 'subscribed', { day: label }));
     },
   },
 
@@ -711,10 +851,26 @@ const HANDLERS = {
       const options = products.map((p) => ({
         id: `p:${p.id}`,
         title: productName(p, s.locale),
-        description: tr(s, 'priceRange', { from: fmt(s, p.price_small), to: fmt(s, p.price_large) }),
+        description: priceRangeLabel(s, p),
       }));
       const hasCart = s.ctx.cart?.length > 0;
       if (hasCart) options.push({ id: 'cart:checkout', title: tr(s, 'btnCheckoutCart') });
+
+      const shop = settings.get();
+      if (waCatalog.isEnabled(shop)) {
+        // WhatsApp draws the products itself, with their pictures and a cart.
+        s.ctx.options = [];
+        if (intro || hasCart) say(s, join(intro, hasCart ? cartText(s) : null));
+        s.out.push(M.productList(s.phone, {
+          catalogId: shop.catalogId,
+          header: tr(s, 'catalogHeader'),
+          body: tr(s, 'catalogBody'),
+          footer: tr(s, 'catalogFooter'),
+          sections: waCatalog.sections(tr(s, 'catalogHeader')),
+        }));
+        return;
+      }
+
       offer(s, join(intro, hasCart ? cartText(s) : null, tr(s, 'pickProduct')), options, {
         buttonLabel: tr(s, 'catalogButton'),
       });
@@ -740,10 +896,15 @@ const HANDLERS = {
     enter(s, intro) {
       const product = db.getProduct(s.ctx.pending?.productId);
       if (!product) return go(s, STATES.PICK_PRODUCT, intro);
-      const options = cart.SIZES.map((size) => ({
-        id: `size:${size}`,
-        title: `${tr(s, `sizesShort.${size}`)} · ${fmt(s, cart.priceOf(product, size))}`,
+      const variants = catalogue.variantsOf(product);
+      if (!variants.length) return go(s, STATES.PICK_PRODUCT, join(intro, tr(s, 'outOfStock', { product: productName(product, s.locale) })));
+      const options = variants.map((v) => ({
+        id: `size:${v.sku}`,
+        title: `${catalogue.variantLabel(v, s.locale)} · ${fmt(s, v.price)}`,
+        description: catalogue.variantLabel(v, s.locale),
       }));
+      // A photo makes the choice obvious for produce sold by heap.
+      if (product.photo) s.out.push(M.image(s.phone, productPhotoUrl(product), productName(product, s.locale)));
       offer(s, join(intro, tr(s, 'pickSize', { product: productName(product, s.locale) })), options);
     },
     handle(s, input) {
@@ -761,7 +922,10 @@ const HANDLERS = {
       if (!product || !size) return go(s, STATES.PICK_PRODUCT, intro);
       const body = join(
         intro,
-        tr(s, 'pickQty', { product: productName(product, s.locale), size: tr(s, `sizes.${size}`) }),
+        tr(s, 'pickQty', {
+          product: productName(product, s.locale),
+          size: catalogue.variantLabel(catalogue.variantOf(product, size), s.locale),
+        }),
         tr(s, 'qtyHint'),
       );
       offer(s, body, [1, 2, 3].map((n) => ({ id: `qty:${n}`, title: String(n) })));
@@ -774,12 +938,45 @@ const HANDLERS = {
 
       const { productId, size } = s.ctx.pending;
       const product = db.getProduct(productId);
-      delete s.ctx.pending;
       if (!product?.in_stock) {
+        delete s.ctx.pending;
         return go(s, STATES.PICK_PRODUCT, tr(s, 'outOfStock', { product: product ? productName(product, s.locale) : '?' }));
       }
-      s.ctx.cart = cart.addItem(s.ctx.cart || [], product.id, size, qty);
-      go(s, STATES.ADD_MORE, tr(s, 'added', { item: cart.describeItem(s.locale, product, size, qty) }));
+      s.ctx.pending.qty = qty;
+      if (catalogue.extrasOf(product).length) return go(s, STATES.PICK_EXTRAS);
+      addPending(s);
+    },
+  },
+
+  // Optional add-ons ("préparé", "nettoyé"): tapping one toggles it, and the
+  // customer confirms when the line is right.
+  [STATES.PICK_EXTRAS]: {
+    enter(s, intro) {
+      const product = db.getProduct(s.ctx.pending?.productId);
+      if (!product) return go(s, STATES.PICK_PRODUCT, intro);
+      const chosen = s.ctx.pending.extras || [];
+      const available = catalogue.extrasOf(product);
+      const options = available.map((e) => ({
+        id: `extra:${e.id}`,
+        title: `${chosen.some((c) => c.id === e.id) ? '✅ ' : ''}${catalogue.extraLabel(e, s.locale)} +${fmt(s, e.price)}`,
+      }));
+      options.push({ id: 'extra:done', title: chosen.length ? tr(s, 'btnExtrasDone') : tr(s, 'btnExtrasNone') });
+      const picked = chosen.length ? tr(s, 'extrasChosen', { items: catalogue.extrasLabel(chosen) }) : null;
+      offer(s, join(intro, tr(s, 'pickExtras'), picked), options, { buttonLabel: tr(s, 'btnExtrasChoose') });
+    },
+    handle(s, input) {
+      const id = pick(s, input);
+      if (id === 'extra:done') return addPending(s);
+      if (!id?.startsWith('extra:')) return reprompt(s, tr(s, 'invalidChoice'));
+      const extraId = Number(id.slice(6));
+      const product = db.getProduct(s.ctx.pending.productId);
+      const extra = catalogue.extrasOf(product).find((e) => e.id === extraId);
+      if (!extra) return reprompt(s, tr(s, 'invalidChoice'));
+      const chosen = s.ctx.pending.extras || [];
+      s.ctx.pending.extras = chosen.some((c) => c.id === extraId)
+        ? chosen.filter((c) => c.id !== extraId)
+        : [...chosen, { id: extra.id, label: catalogue.extraLabel(extra, s.locale), price: extra.price }];
+      reprompt(s);
     },
   },
 
@@ -810,7 +1007,9 @@ const HANDLERS = {
       }
       const options = lines.map((l) => ({
         id: `rm:${l.productId}:${l.size}`,
-        title: tr(s, 'removeItem', { item: `${productName(l.product, s.locale)} ${tr(s, `sizesShort.${l.size}`)}` }),
+        title: tr(s, 'removeItem', {
+          item: `${productName(l.product, s.locale)} ${catalogue.variantLabel(l.variant, s.locale)}`,
+        }),
         description: `× ${l.qty} — ${fmt(s, l.lineTotal)}`,
       }));
       options.push({ id: 'edit:add', title: tr(s, 'btnEditAdd') }, { id: 'edit:done', title: tr(s, 'btnEditDone') });
@@ -823,7 +1022,9 @@ const HANDLERS = {
         const line = (s.ctx.cart || []).find((i) => i.productId === Number(productId) && i.size === size);
         s.ctx.cart = cart.removeItem(s.ctx.cart || [], Number(productId), size);
         const product = db.getProduct(Number(productId));
-        const removed = line && product ? tr(s, 'itemRemoved', { item: cart.describeItem(s.locale, product, size, line.qty) }) : null;
+        const removed = line && product
+          ? tr(s, 'itemRemoved', { item: cart.describeItem(s.locale, product, size, line.qty, line.extras || []) })
+          : null;
         return go(s, STATES.EDIT_CART, removed);
       }
       if (id === 'edit:add') return go(s, STATES.PICK_PRODUCT);
@@ -931,6 +1132,35 @@ const HANDLERS = {
       s.customer = db.updateCustomer(s.customer.id, { name: delivery.name, neighborhood: delivery.zone, address_note: note });
       s.ctx.delivery = delivery;
       delete s.ctx.draft;
+      goSlot(s);
+    },
+  },
+
+  // "Quand souhaitez-vous être livré ?" — only windows that are still bookable.
+  [STATES.PICK_SLOT]: {
+    enter(s, intro) {
+      const options = slots.available().map((a, i) => ({
+        id: `slot:${i}`,
+        title: `${tr(s, `slotWhen.${a.when}`)} · ${slots.slotLabel(a.slot, s.locale)}`,
+        description: a.left !== null ? tr(s, 'slotLeft', { n: a.left }) : `${a.slot.start_time}–${a.slot.end_time}`,
+      }));
+      if (!options.length) return go(s, STATES.RECAP, intro);
+      s.ctx.slotChoices = slots.available().map((a) => ({ id: a.slot.id, day: a.day, when: a.when }));
+      offer(s, join(intro, tr(s, 'askSlot')), options, { buttonLabel: tr(s, 'slotButton') });
+    },
+    handle(s, input) {
+      const id = pick(s, input);
+      if (!id?.startsWith('slot:')) return reprompt(s, tr(s, 'invalidChoice'));
+      const choice = (s.ctx.slotChoices || [])[Number(id.slice(5))];
+      if (!choice) return reprompt(s, tr(s, 'invalidChoice'));
+      if (!slots.stillFree(choice.id, choice.day)) return reprompt(s, tr(s, 'slotFull'));
+      const slot = db.getSlot(choice.id);
+      s.ctx.slot = {
+        id: slot.id,
+        day: choice.day,
+        label: `${tr(s, `slotWhen.${choice.when}`)} · ${slots.slotLabel(slot, s.locale)}`,
+      };
+      delete s.ctx.slotChoices;
       go(s, STATES.RECAP);
     },
   },
@@ -958,15 +1188,17 @@ const HANDLERS = {
       const d = s.ctx.delivery;
       const lines = [
         tr(s, 'recapTitle'),
-        ...priced.lines.map((l) => `• ${cart.describeItem(s.locale, l.product, l.size, l.qty)} — ${fmt(s, l.lineTotal)}`),
+        ...priced.lines.map((l) => `• ${cart.describeItem(s.locale, l.product, l.size, l.qty, l.extras)} — ${fmt(s, l.lineTotal)}`),
         '',
         tr(s, 'subtotalLine', { amount: fmt(s, totals.subtotal) }),
         totals.deliveryFee ? tr(s, 'deliveryFeeLine', { amount: fmt(s, totals.deliveryFee) }) : null,
+        tierPerk(s, totals),
         coupon ? tr(s, 'couponLine', { code: coupon.code, amount: fmt(s, totals.couponDiscount) }) : null,
         totals.discount ? tr(s, 'discountLine', { amount: fmt(s, totals.discount) }) : null,
         tr(s, 'totalLine', { amount: fmt(s, totals.total) }),
         '',
         tr(s, 'deliveryTo', { name: d.name, zone: d.zone, note: d.note }),
+        s.ctx.slot ? tr(s, 'deliverySlotLine', { slot: s.ctx.slot.label }) : null,
       ].filter((l) => l !== null);
       const options = [
         { id: 'recap:confirm', title: tr(s, 'btnConfirm') },
@@ -999,7 +1231,7 @@ const HANDLERS = {
       const result = coupons.evaluate(code, {
         customer: s.customer,
         subtotal: priced.subtotal,
-        deliveryFee: deliveryFeeFor(s.ctx.delivery?.zone),
+        deliveryFee: deliveryFeeFor(s.ctx.delivery?.zone, s.customer),
       });
       if (!result.ok) {
         return reprompt(s, tr(s, `couponRejected.${result.reason}`, { code, min: fmt(s, result.min || 0) }));

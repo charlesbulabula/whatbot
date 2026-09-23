@@ -14,6 +14,11 @@ import { text } from '../bot/messages.js';
 import * as settings from '../shop/settings.js';
 import { COUPON_KINDS, normalizeCode } from '../shop/coupons.js';
 import { smtpConfigured, sendTestEmail } from '../mail.js';
+import * as staff from '../shop/staff.js';
+import { vapid, push } from '../pwa.js';
+import * as waCatalog from '../shop/wa-catalog.js';
+import multer from 'multer';
+import { mediaDir, deleteMedia, TYPES } from '../media.js';
 import { adminDictionaries } from './i18n.js';
 import { mountLiveUpdates } from './live.js';
 import { parseTags } from './pages/customers.js';
@@ -25,12 +30,6 @@ export const adminRouter = express.Router();
 const PAGE_SIZE = 25;
 
 /* -------------------------------- auth --------------------------------- */
-
-const sameSecret = (a, b) => {
-  const ha = crypto.createHash('sha256').update(String(a)).digest();
-  const hb = crypto.createHash('sha256').update(String(b)).digest();
-  return crypto.timingSafeEqual(ha, hb);
-};
 
 // Brute-force guard: after too many wrong passwords from one IP, refuse for a while.
 const FAILURE_LIMIT = 10;
@@ -63,11 +62,11 @@ adminRouter.use((req, res, next) => {
   if (scheme === 'Basic' && encoded) {
     const decoded = Buffer.from(encoded, 'base64').toString('utf8');
     const sep = decoded.indexOf(':');
-    const user = decoded.slice(0, sep);
-    const pass = decoded.slice(sep + 1);
-    if (sep > 0 && sameSecret(user, config.admin.user) && sameSecret(pass, config.admin.password)) {
+    const account = sep > 0 ? staff.authenticate(decoded.slice(0, sep), decoded.slice(sep + 1)) : null;
+    if (account) {
       failures.delete(req.ip);
-      res.locals.actor = user;
+      res.locals.actor = account.username;
+      res.locals.account = account;
       return next();
     }
     recordFailure(req.ip);
@@ -111,6 +110,30 @@ adminRouter.use((req, res, next) => {
   const theme = readCookie(req, 'admin_theme');
   res.locals.theme = theme === 'dark' || theme === 'light' ? theme : '';
   next();
+});
+
+/** Which area of the dashboard a path belongs to, for the role check. */
+function areaOf(path) {
+  if (path.startsWith('/products') || path.startsWith('/zones') || path.startsWith('/coupons')
+    || path.startsWith('/variants') || path.startsWith('/extras') || path.startsWith('/slots')) return 'catalogue';
+  if (path.startsWith('/customers') || path.startsWith('/loyalty') || path.startsWith('/subscriptions')) return 'customers';
+  if (path.startsWith('/broadcast')) return 'marketing';
+  if (path.startsWith('/expenses') || path.startsWith('/stats') || path.startsWith('/accounting')) return 'money';
+  if (path.startsWith('/settings') || path.startsWith('/staff') || path.startsWith('/backup')) return 'settings';
+  if (path.startsWith('/audit')) return 'audit';
+  return 'orders';
+}
+
+adminRouter.use((req, res, next) => {
+  const role = res.locals.account?.role || 'owner';
+  res.locals.role = role;
+  res.locals.can = (area) => staff.can(role, area);
+  // Always allowed: the language and theme toggles, the event stream, signing out.
+  if (['/lang', '/theme', '/events', '/logout'].includes(req.path)) return next();
+  if (staff.can(role, areaOf(req.path))) return next();
+  res.status(403).type('text/html').send(`<!doctype html><meta charset="utf-8">
+<body style="font-family:system-ui;padding:2rem"><h1>403</h1><p>${views.esc(res.locals.L?.forbidden || 'Not allowed')}</p>
+<p><a href="/admin">←</a></p>`);
 });
 
 /** Where a header toggle should send the admin back to. */
@@ -223,6 +246,7 @@ adminRouter.get('/', (req, res) => {
       topProducts: db.topProducts(30).slice(0, 6),
       flash: req.query.flash,
       theme: res.locals.theme,
+    role: res.locals.role,
     }),
   );
 });
@@ -260,6 +284,7 @@ adminRouter.get('/orders', (req, res) => {
     pageSize: PAGE_SIZE,
     flash: req.query.flash,
     theme: res.locals.theme,
+    role: res.locals.role,
   }));
 });
 
@@ -287,6 +312,7 @@ adminRouter.get('/orders/:id', (req, res) => {
     timeline: orderTimeline(L, order),
     flash: req.query.flash,
     theme: res.locals.theme,
+    role: res.locals.role,
   }));
 });
 
@@ -391,6 +417,7 @@ adminRouter.get('/products', (req, res) => {
     lowStock: db.lowStockProducts(),
     flash: req.query.flash,
     theme: res.locals.theme,
+    role: res.locals.role,
   }));
 });
 
@@ -555,6 +582,7 @@ adminRouter.get('/customers', (req, res) => {
     },
     flash: req.query.flash,
     theme: res.locals.theme,
+    role: res.locals.role,
   }));
 });
 
@@ -614,6 +642,7 @@ adminRouter.get('/customers/:id', (req, res) => {
     flash: req.query.flash,
     flashTone: req.query.tone === 'danger' ? 'danger' : '',
     theme: res.locals.theme,
+    role: res.locals.role,
   }));
 });
 
@@ -734,6 +763,7 @@ adminRouter.get('/loyalty', (req, res) => {
     rules: { every: shop.loyaltyEvery, reward: shop.loyaltyReward, referralReward: shop.referralReward },
     flash: req.query.flash,
     theme: res.locals.theme,
+    role: res.locals.role,
   }));
 });
 
@@ -754,6 +784,7 @@ adminRouter.get('/expenses', (req, res) => {
     byCategory: db.expensesByCategory(from, to),
     flash: req.query.flash,
     theme: res.locals.theme,
+    role: res.locals.role,
   }));
 });
 
@@ -784,6 +815,7 @@ adminRouter.get('/audit', (req, res) => {
     page,
     pageSize: size,
     theme: res.locals.theme,
+    role: res.locals.role,
   }));
 });
 
@@ -811,6 +843,7 @@ adminRouter.get('/broadcast', (req, res) => {
       : null,
     flash: req.query.flash,
     theme: res.locals.theme,
+    role: res.locals.role,
   }));
 });
 
@@ -837,7 +870,7 @@ adminRouter.post('/broadcast', async (req, res) => {
 
 /* ------------------------------- settings ------------------------------- */
 
-const SETTINGS_TABS = ['shop', 'hours', 'payment', 'alerts', 'loyalty', 'system'];
+const SETTINGS_TABS = ['shop', 'hours', 'payment', 'alerts', 'loyalty', 'tiers', 'catalogue', 'accounting', 'system'];
 
 function systemInfo() {
   let dbSize = '—';
@@ -856,6 +889,8 @@ function systemInfo() {
     tz: process.env.TZ || Intl.DateTimeFormat().resolvedOptions().timeZone,
     waReady: Boolean(config.whatsapp.token && config.whatsapp.phoneNumberId),
     aiReady: Boolean(config.ai.apiKey),
+    sttReady: Boolean(config.stt.provider && config.stt.apiKey),
+    catalogReady: waCatalog.isEnabled(),
   };
 }
 
@@ -870,6 +905,7 @@ adminRouter.get('/settings', (req, res) => {
     flash: req.query.flash,
     flashTone: req.query.tone === 'danger' ? 'danger' : '',
     theme: res.locals.theme,
+    role: res.locals.role,
   }));
 });
 
@@ -919,6 +955,23 @@ adminRouter.post('/settings', (req, res) => {
       referralReward: toInt(b.referralReward),
     });
   }
+  if (tab === 'tiers') {
+    Object.assign(patch, {
+      tierSilverOrders: toInt(b.tierSilverOrders),
+      tierSilverDelivery: toInt(b.tierSilverDelivery),
+      tierGoldOrders: toInt(b.tierGoldOrders),
+      tierGoldDelivery: toInt(b.tierGoldDelivery),
+      winbackEnabled: b.winbackEnabled === '1',
+      winbackDays: toInt(b.winbackDays),
+      winbackDiscount: toInt(b.winbackDiscount),
+    });
+  }
+  if (tab === 'catalogue') {
+    Object.assign(patch, { catalogEnabled: b.catalogEnabled === '1', catalogId: b.catalogId });
+  }
+  if (tab === 'accounting') {
+    Object.assign(patch, { vatRate: toInt(b.vatRate), businessId: b.businessId });
+  }
 
   settings.save(patch);
   log(res, 'settings.save', tab);
@@ -948,6 +1001,308 @@ adminRouter.get('/backup', (req, res) => {
   }
 });
 
+/* ---------------------------- push notifications ------------------------ */
+
+adminRouter.post('/push/subscribe', express.json({ limit: '4kb' }), (req, res) => {
+  const { endpoint, keys } = req.body || {};
+  if (!endpoint || !keys?.p256dh || !keys?.auth) return res.status(400).json({ ok: false });
+  db.savePushSubscription({ endpoint, p256dh: keys.p256dh, auth: keys.auth, actor: res.locals.actor });
+  res.json({ ok: true });
+});
+
+adminRouter.post('/push/test', async (req, res) => {
+  const { L } = res.locals;
+  const sent = await push({ title: settings.get().name, body: L.pushTestBody, url: '/admin' });
+  res.redirect(withFlash('/admin/settings?tab=alerts', L.pushTestSent(sent)));
+});
+
+/* -------------------------------- staff --------------------------------- */
+
+adminRouter.get('/staff', (req, res) => {
+  const { L, locale } = res.locals;
+  res.send(views.staffPage(L, locale, {
+    rows: staff.list(),
+    owner: config.admin.user,
+    flash: req.query.flash,
+    flashTone: req.query.tone === 'danger' ? 'danger' : '',
+    theme: res.locals.theme,
+    role: res.locals.role,
+  }));
+});
+
+adminRouter.post('/staff', (req, res) => {
+  const { L } = res.locals;
+  const username = staff.normalizeUsername(req.body.username);
+  const password = String(req.body.password || '');
+  if (!username || password.length < 8) return res.redirect(`${withFlash('/admin/staff', L.staffNeedsPassword)}&tone=danger`);
+  if (staff.byUsername(username) || username === config.admin.user) {
+    return res.redirect(`${withFlash('/admin/staff', L.staffExists)}&tone=danger`);
+  }
+  staff.create({ username, name: req.body.name, role: req.body.role, password });
+  log(res, 'staff.create', username, req.body.role);
+  res.redirect(withFlash('/admin/staff', L.saved));
+});
+
+adminRouter.post('/staff/:id', (req, res) => {
+  const { L } = res.locals;
+  const account = staff.get(Number(req.params.id));
+  if (!account) return res.status(404).send('Not found');
+  const password = String(req.body.password || '');
+  if (password && password.length < 8) return res.redirect(`${withFlash('/admin/staff', L.staffNeedsPassword)}&tone=danger`);
+  staff.update(account.id, {
+    name: req.body.name,
+    role: req.body.role,
+    active: req.body.active === '1',
+    password: password || undefined,
+  });
+  log(res, 'staff.update', account.username);
+  res.redirect(withFlash('/admin/staff', L.saved));
+});
+
+adminRouter.post('/staff/:id/delete', (req, res) => {
+  const account = staff.get(Number(req.params.id));
+  if (!account) return res.status(404).send('Not found');
+  staff.remove(account.id);
+  log(res, 'staff.delete', account.username);
+  res.redirect(withFlash('/admin/staff', res.locals.L.saved));
+});
+
+/* ---------------------------- delivery slots ----------------------------- */
+
+const slotFields = (b) => ({
+  label_fr: str(b.label_fr, 40),
+  label_en: str(b.label_en, 40),
+  label_ln: str(b.label_ln, 40) || null,
+  start_time: /^\d{2}:\d{2}$/.test(b.start_time) ? b.start_time : '08:00',
+  end_time: /^\d{2}:\d{2}$/.test(b.end_time) ? b.end_time : '12:00',
+  capacity: toInt(b.capacity),
+  active: b.active === '1' ? 1 : 0,
+  sort_order: Math.round(Number(b.sort_order) || 0),
+});
+
+adminRouter.get('/slots', (req, res) => {
+  const { L, locale } = res.locals;
+  const day = localDay();
+  res.send(views.slotsPage(L, locale, {
+    slots: db.listSlots(),
+    load: db.slotLoad(day),
+    day,
+    flash: req.query.flash,
+    theme: res.locals.theme,
+    role: res.locals.role,
+  }));
+});
+
+adminRouter.post('/slots', (req, res) => {
+  const fields = slotFields(req.body);
+  if (!fields.label_fr || !fields.label_en) return res.status(400).send('Label required');
+  const sortOrder = db.listSlots().reduce((max, s) => Math.max(max, s.sort_order), 0) + 1;
+  db.createSlot({ ...fields, active: 1, sort_order: sortOrder });
+  log(res, 'slot.create', fields.label_fr);
+  res.redirect(withFlash('/admin/slots', res.locals.L.saved));
+});
+
+adminRouter.post('/slots/:id', (req, res) => {
+  db.updateSlot(Number(req.params.id), slotFields(req.body));
+  log(res, 'slot.update', String(req.params.id));
+  res.redirect(withFlash('/admin/slots', res.locals.L.saved));
+});
+
+adminRouter.post('/slots/:id/delete', (req, res) => {
+  db.deleteSlot(Number(req.params.id));
+  log(res, 'slot.delete', String(req.params.id));
+  res.redirect(withFlash('/admin/slots', res.locals.L.saved));
+});
+
+/* ---------------------- one product: variants & extras ------------------- */
+
+adminRouter.get('/products/:id/edit', (req, res) => {
+  const { L, locale } = res.locals;
+  const product = db.getProduct(Number(req.params.id));
+  if (!product) return res.status(404).send('Not found');
+  res.send(views.productPage(L, locale, {
+    product,
+    variants: db.listVariants(product.id, { onlyActive: false }),
+    extras: db.listExtras(product.id, { onlyActive: false }),
+    flash: req.query.flash,
+    theme: res.locals.theme,
+    role: res.locals.role,
+  }));
+});
+
+const variantFields = (b) => ({
+  label_fr: str(b.label_fr, 40),
+  label_en: str(b.label_en, 40),
+  label_ln: str(b.label_ln, 40) || null,
+  price: toInt(b.price),
+  active: b.active === '1' ? 1 : 0,
+  sort_order: Math.round(Number(b.sort_order) || 0),
+});
+
+adminRouter.post('/products/:id/variants', (req, res) => {
+  const product = db.getProduct(Number(req.params.id));
+  if (!product) return res.status(404).send('Not found');
+  const sku = str(req.body.sku, 24).toLowerCase().replace(/[^a-z0-9_-]/g, '');
+  const fields = variantFields(req.body);
+  if (!sku || !fields.label_fr || !fields.label_en) return res.status(400).send('Missing fields');
+  if (db.getVariant(product.id, sku)) return res.redirect(withFlash(`/admin/products/${product.id}/edit`, res.locals.L.variantExists));
+  const sortOrder = db.listVariants(product.id, { onlyActive: false }).reduce((m, v) => Math.max(m, v.sort_order), 0) + 1;
+  db.createVariant({ product_id: product.id, sku, ...fields, active: 1, sort_order: sortOrder });
+  log(res, 'variant.create', `${product.name_fr}/${sku}`);
+  res.redirect(withFlash(`/admin/products/${product.id}/edit`, res.locals.L.saved));
+});
+
+adminRouter.post('/variants/:id', (req, res) => {
+  const variant = db.updateVariant(Number(req.params.id), variantFields(req.body));
+  log(res, 'variant.update', String(req.params.id));
+  res.redirect(withFlash(`/admin/products/${variant?.product_id || ''}/edit`, res.locals.L.saved));
+});
+
+adminRouter.post('/variants/:id/delete', (req, res) => {
+  const variant = db.listProducts({ onlyInStock: false })
+    .map((p) => db.listVariants(p.id, { onlyActive: false }))
+    .flat()
+    .find((v) => v.id === Number(req.params.id));
+  db.deleteVariant(Number(req.params.id));
+  log(res, 'variant.delete', String(req.params.id));
+  res.redirect(withFlash(`/admin/products/${variant?.product_id || ''}/edit`, res.locals.L.saved));
+});
+
+const extraFields = (b) => ({
+  label_fr: str(b.label_fr, 40),
+  label_en: str(b.label_en, 40),
+  label_ln: str(b.label_ln, 40) || null,
+  price: toInt(b.price),
+  active: b.active === '1' ? 1 : 0,
+});
+
+adminRouter.post('/products/:id/extras', (req, res) => {
+  const product = db.getProduct(Number(req.params.id));
+  if (!product) return res.status(404).send('Not found');
+  const fields = extraFields(req.body);
+  if (!fields.label_fr || !fields.label_en) return res.status(400).send('Missing fields');
+  db.createExtra({ ...fields, product_id: req.body.global === '1' ? null : product.id, active: 1 });
+  log(res, 'extra.create', fields.label_fr);
+  res.redirect(withFlash(`/admin/products/${product.id}/edit`, res.locals.L.saved));
+});
+
+adminRouter.post('/extras/:id', (req, res) => {
+  const extra = db.updateExtra(Number(req.params.id), extraFields(req.body));
+  log(res, 'extra.update', String(req.params.id));
+  res.redirect(withFlash(`/admin/products/${extra?.product_id || ''}/edit`, res.locals.L.saved));
+});
+
+adminRouter.post('/extras/:id/delete', (req, res) => {
+  const extra = db.allExtras().find((e) => e.id === Number(req.params.id));
+  db.deleteExtra(Number(req.params.id));
+  log(res, 'extra.delete', String(req.params.id));
+  res.redirect(withFlash(`/admin/products/${extra?.product_id || ''}/edit`, res.locals.L.saved));
+});
+
+adminRouter.post('/products/:id/retailer', (req, res) => {
+  const product = db.getProduct(Number(req.params.id));
+  if (!product) return res.status(404).send('Not found');
+  db.updateProduct(product.id, { retailer_id: str(req.body.retailer_id, 60) || null });
+  log(res, 'product.retailer', product.name_fr);
+  res.redirect(withFlash(`/admin/products/${product.id}/edit`, res.locals.L.saved));
+});
+
+/* ---------------------------- product photos ----------------------------- */
+
+const upload = multer({
+  storage: multer.diskStorage({
+    destination: (_req, _file, cb) => cb(null, mediaDir('products')),
+    filename: (req, file, cb) => cb(null, `p${req.params.id}-${Date.now()}${TYPES[file.mimetype] || '.jpg'}`),
+  }),
+  limits: { fileSize: 3 * 1024 * 1024, files: 1 },
+  fileFilter: (_req, file, cb) => cb(null, Boolean(TYPES[file.mimetype])),
+});
+
+adminRouter.post('/products/:id/photo', upload.single('photo'), (req, res) => {
+  const product = db.getProduct(Number(req.params.id));
+  if (!product) return res.status(404).send('Not found');
+  if (!req.file) return res.redirect(`${withFlash(`/admin/products/${product.id}/edit`, res.locals.L.photoRejected)}&tone=danger`);
+  if (product.photo) deleteMedia('products', product.photo);
+  db.updateProduct(product.id, { photo: req.file.filename });
+  log(res, 'product.photo', product.name_fr);
+  res.redirect(withFlash(`/admin/products/${product.id}/edit`, res.locals.L.saved));
+});
+
+adminRouter.post('/products/:id/photo/delete', (req, res) => {
+  const product = db.getProduct(Number(req.params.id));
+  if (!product) return res.status(404).send('Not found');
+  if (product.photo) deleteMedia('products', product.photo);
+  db.updateProduct(product.id, { photo: null });
+  log(res, 'product.photo.delete', product.name_fr);
+  res.redirect(withFlash(`/admin/products/${product.id}/edit`, res.locals.L.saved));
+});
+
+/* ----------------------------- subscriptions ----------------------------- */
+
+adminRouter.get('/subscriptions', (req, res) => {
+  const { L, locale } = res.locals;
+  res.send(views.subscriptionsPage(L, locale, {
+    rows: db.listSubscriptions(),
+    flash: req.query.flash,
+    theme: res.locals.theme,
+    role: res.locals.role,
+  }));
+});
+
+adminRouter.post('/subscriptions/:id/toggle', (req, res) => {
+  db.updateSubscription(Number(req.params.id), { active: req.body.active === '1' ? 1 : 0 });
+  log(res, 'subscription.toggle', String(req.params.id));
+  res.redirect(withFlash('/admin/subscriptions', res.locals.L.saved));
+});
+
+adminRouter.post('/subscriptions/:id/delete', (req, res) => {
+  db.deleteSubscription(Number(req.params.id));
+  log(res, 'subscription.delete', String(req.params.id));
+  res.redirect(withFlash('/admin/subscriptions', res.locals.L.saved));
+});
+
+/* ------------------------------- accounting ------------------------------ */
+
+function ledger(query) {
+  const to = isDay(query.to) ? query.to : localDay();
+  const from = isDay(query.from) ? query.from : shiftDay(to, -89);
+  const entries = db.cashBook(from, to);
+  const income = entries.filter((e) => e.amount > 0).reduce((s, e) => s + e.amount, 0);
+  const spending = entries.filter((e) => e.amount < 0).reduce((s, e) => s - e.amount, 0);
+  const shop = settings.get();
+  // Prices are VAT-inclusive, so the base is the total less the tax share.
+  const beforeVat = shop.vatRate ? Math.round((income * 100) / (100 + shop.vatRate)) : income;
+  return {
+    from, to, entries, shop,
+    months: db.monthlyLedger(from, to),
+    totals: { income, spending, balance: income - spending, count: entries.length, beforeVat, vat: income - beforeVat },
+  };
+}
+
+adminRouter.get('/accounting', (req, res) => {
+  const { L, locale } = res.locals;
+  res.send(views.accountingPage(L, locale, { ...ledger(req.query), theme: res.locals.theme, role: res.locals.role }));
+});
+
+adminRouter.get('/accounting.csv', (req, res) => {
+  const { L, locale } = res.locals;
+  const { from, to, entries } = ledger(req.query);
+  const header = ['date', 'type', 'reference', 'libelle', 'mode', 'entree', 'sortie'];
+  const rows = entries.map((e) => [
+    e.day,
+    e.kind === 'order' ? 'vente' : 'depense',
+    e.ref,
+    e.label,
+    e.kind === 'order' ? e.method : L.expenseCategories[e.method] || e.method,
+    e.amount > 0 ? e.amount : '',
+    e.amount < 0 ? -e.amount : '',
+  ]);
+  res
+    .set('Content-Type', 'text/csv; charset=utf-8')
+    .set('Content-Disposition', `attachment; filename="journal-${from}-${to}.csv"`)
+    .send(csvBody(header, rows));
+});
+
 /* ---------------------------- rider route sheet ------------------------ */
 
 adminRouter.get('/route', (req, res) => {
@@ -964,7 +1319,7 @@ adminRouter.get('/route', (req, res) => {
 target="_blank" rel="noopener noreferrer">${views.esc(L.route.sendWhatsApp)}</a></div></div></div>
 <section class="section"><div class="section__title"><h2>${views.esc(L.route.toDeliver)} (${pending.length})</h2></div>
 ${pending.length ? `<div class="grid">${riderCards(L, pending)}</div>` : `<div class="card"><div class="card__body"><p class="muted">${views.esc(L.route.empty)}</p></div></div>`}</section>`;
-  res.send(views.layout(L, { title: `${L.route.title} — ${day}`, active: 'route', body, theme: res.locals.theme }));
+  res.send(views.layout(L, { title: `${L.route.title} — ${day}`, active: 'route', body, theme: res.locals.theme, role: res.locals.role }));
 });
 
 /* --------------------------------- stats ------------------------------- */
@@ -992,6 +1347,7 @@ adminRouter.get('/stats', (req, res) => {
       newPerDay: series.map((d) => newPerDayMap.get(d.day) || 0),
       expenses: db.expenseTotal(from, to),
       theme: res.locals.theme,
+    role: res.locals.role,
     }),
   );
 });
@@ -1022,7 +1378,7 @@ adminRouter.get('/export.csv', (req, res) => {
     `+${o.customer.phone}`,
     o.neighborhood,
     o.address_note,
-    o.items.map((it) => `${locale === 'en' ? it.name_en : it.name_fr} ${L.sizes[it.size]} x${it.quantity}`).join(', '),
+    o.items.map((it) => `${locale === 'en' ? it.name_en : it.name_fr} ${it.variant_label || L.sizes[it.size] || it.size} x${it.quantity}`).join(', '),
     o.subtotal, o.delivery_fee, o.coupon, o.coupon_discount, o.discount, o.total,
     o.paid_at, o.delivered_at, o.rating,
   ]);

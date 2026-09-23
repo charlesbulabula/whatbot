@@ -15,7 +15,7 @@ const LOYALTY_TABS = (L) => [
 ];
 
 export function loyaltyPage(L, locale, data) {
-  const { tab = 'balances', totals, holders, entries, referral, referrers, rules, theme, flash } = data;
+  const { tab = 'balances', totals, holders, entries, referral, referrers, rules, theme, flash, role = 'owner' } = data;
 
   const tiles = `<div class="stats">
 ${stat({ name: 'gift', tone: 'warning', value: money(locale, totals.outstanding), label: L.creditOutstanding, hint: L.creditOutstandingHint })}
@@ -82,7 +82,7 @@ ${section(L.topReferrers, referrers.length
   };
 
   const body = `${tiles}${tabs(LOYALTY_TABS(L), tab)}${panels[tab] || panels.balances}`;
-  return layout(L, { title: L.navLoyalty, active: 'loyalty', body, flash, theme });
+  return layout(L, { role, title: L.navLoyalty, active: 'loyalty', body, flash, theme });
 }
 
 /* ------------------------------- expenses ------------------------------- */
@@ -90,7 +90,7 @@ ${section(L.topReferrers, referrers.length
 const CATEGORIES = ['stock', 'transport', 'salaire', 'autre'];
 
 export function expensesPage(L, locale, data) {
-  const { from, to, rows, total, revenue, byCategory, days, theme, flash } = data;
+  const { from, to, rows, total, revenue, byCategory, days, theme, flash, role = 'owner' } = data;
   const margin = revenue - total;
   const marginPct = revenue ? Math.round((margin / revenue) * 100) : 0;
 
@@ -130,12 +130,12 @@ ${section(`${L.expenses} — ${from} → ${to}`, rows.length
     ? table([L.date, L.category, L.label, { label: L.amount, num: true }, ''], list)
     : card(empty(L.noExpenses, 'wallet')))}`;
 
-  return layout(L, { title: L.navExpenses, active: 'expenses', body, flash, theme });
+  return layout(L, { role, title: L.navExpenses, active: 'expenses', body, flash, theme });
 }
 
 /* ------------------------------- audit log ------------------------------ */
 
-export function auditPage(L, locale, { rows, total, page, pageSize, theme }) {
+export function auditPage(L, locale, { rows, total, page, pageSize, theme , role = 'owner' }) {
   const list = rows
     .map((e) => `<tr><td class="muted nowrap">${esc(utcDateTime(e.created_at, locale))}</td>
 <td>${esc(e.actor)}</td><td><b class="strong">${esc(L.auditActions[e.action] || e.action)}</b></td>
@@ -144,12 +144,12 @@ export function auditPage(L, locale, { rows, total, page, pageSize, theme }) {
   const body = `<p class="muted">${esc(L.auditHint)}</p>
 ${rows.length ? table([L.date, L.author, L.action, L.target, L.detail], list) : card(empty(L.noActivity, 'history'))}
 ${pager(L, { page, pageSize, total, url: (p) => `/admin/audit?page=${p}` })}`;
-  return layout(L, { title: L.navAudit, active: 'audit', body, theme });
+  return layout(L, { role, title: L.navAudit, active: 'audit', body, theme });
 }
 
 /* ------------------------------- broadcast ------------------------------ */
 
-export function broadcastPage(L, locale, { audiences, lastResult, theme, flash, flashTone }) {
+export function broadcastPage(L, locale, { audiences, lastResult, theme, flash, flashTone , role = 'owner' }) {
   const options = audiences
     .map((a) => `<option value="${esc(a.key)}">${esc(a.label)} (${a.count})</option>`)
     .join('');
@@ -173,12 +173,12 @@ ${section(L.audiences, table([L.audience, { label: L.customers, num: true }],
     audiences.map((a) => `<tr><td>${esc(a.label)}<br><span class="muted" style="font-size:.8125rem">${esc(a.hint)}</span></td>
 <td class="num tabnum">${a.count}</td></tr>`).join('')))}`;
 
-  return layout(L, { title: L.navBroadcast, active: 'broadcast', body, flash, flashTone, theme });
+  return layout(L, { role, title: L.navBroadcast, active: 'broadcast', body, flash, flashTone, theme });
 }
 
 /* ----------------------------- global search ---------------------------- */
 
-export function searchPage(L, locale, { query, results, theme }) {
+export function searchPage(L, locale, { query, results, theme , role = 'owner' }) {
   const { orders, customers, coupons } = results;
   const nothing = !orders.length && !customers.length && !coupons.length;
 
@@ -203,5 +203,5 @@ ${orders.length ? section(L.navOrders, table([L.reference, L.customers, L.status
 ${customers.length ? section(L.customers, table([L.name, L.phone, L.zone], customerRows)) : ''}
 ${coupons.length ? section(L.coupons, table([L.couponCode, L.couponKind, { label: L.couponValue, num: true }], couponRows)) : ''}`;
 
-  return layout(L, { title: L.searchTitle, active: '', body, theme, search: query });
+  return layout(L, { role, title: L.searchTitle, active: '', body, theme, search: query });
 }

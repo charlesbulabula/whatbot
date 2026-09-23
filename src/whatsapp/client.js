@@ -60,6 +60,28 @@ function toPayload(msg) {
           },
         },
       };
+    case 'image':
+      return { ...base, type: 'image', image: { link: msg.link, ...(msg.caption && { caption: msg.caption }) } };
+    // A catalogue message: WhatsApp renders the products from the Meta catalog,
+    // with their pictures, and the customer builds a cart inside WhatsApp.
+    case 'product_list':
+      return {
+        ...base,
+        type: 'interactive',
+        interactive: {
+          type: 'product_list',
+          header: { type: 'text', text: msg.header },
+          body: { text: msg.body },
+          ...(msg.footer && { footer: { text: msg.footer } }),
+          action: {
+            catalog_id: msg.catalogId,
+            sections: msg.sections.map((sec) => ({
+              title: sec.title,
+              product_items: sec.items.map((id) => ({ product_retailer_id: id })),
+            })),
+          },
+        },
+      };
     case 'template':
       return {
         ...base,

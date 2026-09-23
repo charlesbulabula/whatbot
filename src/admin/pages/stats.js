@@ -10,7 +10,7 @@ import { compact, shortDate } from './dashboard.js';
 export function statsPage(L, locale, data) {
   const {
     days, series, stats, previous, products, zones, segments, payments, coupons,
-    statuses = [], byHour = [], newPerDay = [], expenses = 0, theme,
+    statuses = [], byHour = [], newPerDay = [], expenses = 0, theme, role = 'owner'
   } = data;
 
   const periods = [7, 30, 90]
@@ -94,5 +94,5 @@ ${section(L.stats.topProducts, products.length
     : card(empty(L.stats.empty, 'basket')))}
 ${segments.length ? section(L.stats.segments, `<div class="actions">${segmentLine}</div>`) : ''}`;
 
-  return layout(L, { title: L.stats.title, active: 'stats', body, theme });
+  return layout(L, { role, title: L.stats.title, active: 'stats', body, theme });
 }

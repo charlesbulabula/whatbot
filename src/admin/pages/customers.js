@@ -17,7 +17,7 @@ export const parseTags = (value) =>
 /* -------------------------------- listing ------------------------------- */
 
 export function customersPage(L, locale, data) {
-  const { rows, total, filters, zones, page, pageSize, stats, flash, theme } = data;
+  const { rows, total, filters, zones, page, pageSize, stats, flash, theme, role = 'owner' } = data;
   const q = (patch = {}) => {
     const p = new URLSearchParams();
     for (const [k, v] of Object.entries({ ...filters, ...patch })) if (v) p.set(k, v);
@@ -94,6 +94,7 @@ ${stat({ name: 'share', tone: 'info', value: String(stats.referred), label: L.fl
 <button class="btn no-print" onclick="window.print()">${icon('print', 17)} ${esc(L.print)}</button></div>`;
 
   return layout(L, {
+    role,
     title: L.customers,
     active: 'customers',
     body: `${tiles}${bar}${filterChips(chips)}${head}${list}
@@ -117,7 +118,7 @@ export function customerPage(L, locale, data) {
   const {
     customer, orders, messages, state, canReply, tab = 'overview',
     timeline = [], credits = [], notes = [], invited = [], referrer = null,
-    stats = {}, flash, flashTone, theme,
+    stats = {}, flash, flashTone, theme, role = 'owner',
   } = data;
   const human = state === 'HUMAN';
   const tags = parseTags(customer.tags);
@@ -174,7 +175,7 @@ ${tabs(TABS(L, customer.id), tab)}
 ${panels[tab] || panels.overview}
 ${tab === 'chat' ? liveUpdates(L) : ''}`;
 
-  return layout(L, { title: customer.name || customer.phone, active: 'customers', body, flash, flashTone, theme });
+  return layout(L, { role, title: customer.name || customer.phone, active: 'customers', body, flash, flashTone, theme });
 }
 
 function replyBlock(L, { customer, canReply, human }) {

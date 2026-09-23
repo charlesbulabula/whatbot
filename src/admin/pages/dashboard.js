@@ -3,7 +3,8 @@
 import { money } from '../../i18n/index.js';
 import {
   esc, linkify, card, section, empty, alert, stat, trendTag, badge, statusBadge, paymentBadge,
-  waLink, table, layout, liveUpdates, icon, productLabel, utcTime, iconAction, iconPost,
+  waLink, table, layout, liveUpdates, icon, productLabel, variantName, extrasName, utcTime,
+  iconAction, iconPost,
 } from '../ui.js';
 import { areaChart, barChart, donutChart, rankedBars, sparkline } from '../charts.js';
 
@@ -45,14 +46,18 @@ export function statusActions(L, order, back) {
 
 export function orderCard(L, locale, order, back) {
   const items = order.items
-    .map((it) => `<li>${productLabel(it, locale)} — ${esc(L.sizes[it.size] || it.size)} × ${it.quantity}
-<span class="muted tabnum">${esc(money(locale, it.line_total))}</span></li>`)
+    .map((it) => {
+      const extras = extrasName(it);
+      return `<li>${productLabel(it, locale)} — ${esc(variantName(L, it))}${extras ? ` <span class="muted">(${esc(extras)})</span>` : ''}
+ × ${it.quantity} <span class="muted tabnum">${esc(money(locale, it.line_total))}</span></li>`;
+    })
     .join('');
   const head = `<a href="/admin/orders/${order.id}"><b>${esc(order.reference)}</b></a>
 <span class="spacer"></span>${paymentBadge(L, order)}${statusBadge(L, order.status)}`;
   const body = `<div class="muted">${esc(utcTime(order.created_at, locale))} · ${esc(order.customer_name || '')} · ${waLink(order.customer.phone)}</div>
 <div>${icon('pin', 15)} <b class="strong">${esc(order.neighborhood || '')}</b>
 ${order.address_note ? `<span class="muted">— ${linkify(order.address_note)}</span>` : ''}</div>
+${order.slot_label ? `<div class="muted">${icon('clock', 15)} ${esc(order.slot_label)}</div>` : ''}
 <ul>${items}</ul>
 <div class="actions"><span>${esc(L.total)} : <b class="strong tabnum">${esc(money(locale, order.total))}</b></span>
 ${order.coupon ? badge(`${order.coupon} −${money(locale, order.coupon_discount)}`, 'info') : ''}
@@ -73,25 +78,24 @@ ${iconAction(`/admin/orders/${order.id}/ticket`, 'print', L.ticket, { target: '_
 
 export function quantitiesTable(L, locale, rows, valueKey, emptyLabel) {
   if (!rows.length) return empty(emptyLabel, 'basket');
+  // Variants are free-form now, so the columns are whichever ones actually sold.
+  const columns = [...new Set(rows.map((r) => r.size))];
+  const label = (sku) => rows.find((r) => r.size === sku)?.variant_label || L.sizes[sku] || sku;
   const byProduct = new Map();
   for (const r of rows) {
-    if (!byProduct.has(r.product_id)) byProduct.set(r.product_id, { label: productLabel(r, locale), small: 0, medium: 0, large: 0 });
-    byProduct.get(r.product_id)[r.size] = r[valueKey];
+    if (!byProduct.has(r.product_id)) byProduct.set(r.product_id, { label: productLabel(r, locale), cells: {} });
+    byProduct.get(r.product_id).cells[r.size] = r[valueKey];
   }
   const body = [...byProduct.values()]
-    .map((p) => `<tr><td>${p.label}</td><td class="num">${p.small || '–'}</td><td class="num">${p.medium || '–'}</td>
-<td class="num">${p.large || '–'}</td></tr>`)
+    .map((p) => `<tr><td>${p.label}</td>${columns.map((c) => `<td class="num">${p.cells[c] || '–'}</td>`).join('')}</tr>`)
     .join('');
-  return table(
-    [L.product, { label: L.sizes.small, num: true }, { label: L.sizes.medium, num: true }, { label: L.sizes.large, num: true }],
-    body,
-  );
+  return table([L.product, ...columns.map((c) => ({ label: label(c), num: true }))], body);
 }
 
 export function dashboardPage(L, locale, data) {
   const {
     day, prevDay, nextDay, isToday, orders, kpis, shopping, forecast, handoffs = [], lowStock = [],
-    series = [], newPerDay = [], statuses = [], byHour = [], topProducts = [], flash, theme,
+    series = [], newPerDay = [], statuses = [], byHour = [], topProducts = [], flash, theme, role = 'owner'
   } = data;
   const back = `/admin?day=${day}`;
   const fmt = (v, short) => (short ? compact(locale, v) : money(locale, v));
@@ -169,7 +173,7 @@ ${section(L.forecast, quantitiesTable(L, locale, forecast, 'weekly_avg', L.noDat
 ${isToday ? liveUpdates(L) : ''}`;
 
   const pending = kpis.toCheck + handoffs.length;
-  return layout(L, { title: `${pending ? `(${pending}) ` : ''}${L.title}`, active: 'orders', body, flash, theme });
+  return layout(L, { role, title: `${pending ? `(${pending}) ` : ''}${L.title}`, active: 'orders', body, flash, theme });
 }
 
 function handoffCard(L, handoffs) {

@@ -9,6 +9,8 @@ import { text } from './messages.js';
 import { notify } from './notify.js';
 import { publish } from '../utils/events.js';
 import { sendAlert } from '../mail.js';
+import * as loyalty from '../shop/loyalty.js';
+import { trackingUrl } from '../tracking.js';
 import * as settings from '../shop/settings.js';
 import { downloadMedia } from '../whatsapp/client.js';
 
@@ -44,8 +46,13 @@ export async function changeOrderStatus(orderId, status, { eta } = {}) {
 
   let notified = 'unchanged';
   if ((previous !== status || (status === 'on_the_way' && eta)) && STATUS_MESSAGE[status]) {
+    const body = t(locale, STATUS_MESSAGE[status], { ref: order.reference, eta: order.eta });
+    // On the way: give the customer a live link instead of "it is coming".
+    const withLink = status === 'on_the_way' && config.publicUrl
+      ? `${body}\n\n${t(locale, 'trackLink', { url: trackingUrl(order) })}`
+      : body;
     notified = await safeNotify(customer, {
-      message: text(customer.phone, t(locale, STATUS_MESSAGE[status], { ref: order.reference, eta: order.eta })),
+      message: text(customer.phone, withLink),
       templateKey: 'orderUpdate',
       templateParams: [order.reference, t(locale, `status.${status}`)],
     });
@@ -65,6 +72,19 @@ function once(key) {
 /** Loyalty credit every Nth order, referral credit for the referrer, and the referral code after order #2. */
 export async function rewardsAfterPayment(order) {
   const shop = settings.get();
+  // Tiers first: the congratulation should mention the tier they just reached.
+  const newTier = loyalty.refresh(order.customer_id);
+  if (newTier && newTier !== 'bronze') {
+    const c0 = db.getCustomerById(order.customer_id);
+    const locale0 = normalizeLocale(c0.locale);
+    const pct = loyalty.deliveryDiscountPct(newTier, shop);
+    await safeNotify(c0, {
+      message: text(c0.phone, t(locale0, 'tierReached', {
+        tier: t(locale0, `tiers.${newTier}`),
+        perk: pct >= 100 ? t(locale0, 'tierPerkFree') : t(locale0, 'tierPerkOff', { pct }),
+      })),
+    });
+  }
   const L = { every: shop.loyaltyEvery, reward: shop.loyaltyReward, referralReward: shop.referralReward };
   const c = db.getCustomerById(order.customer_id);
   const locale = normalizeLocale(c.locale);
@@ -118,9 +138,11 @@ export async function notifyAdmin(body, templateParams = []) {
   return result;
 }
 
-export function notifyAdminProof(order, { paidByCredit = false, cash = false } = {}) {
+export function notifyAdminProof(order, { paidByCredit = false, cash = false, subscription = false } = {}) {
   const total = money(DEFAULT_LOCALE, order.total);
-  const key = paidByCredit ? 'adminPaidByCredit' : cash ? 'adminCashOrder' : 'adminProof';
+  const key = subscription ? 'adminSubscriptionOrder'
+    : paidByCredit ? 'adminPaidByCredit'
+      : cash ? 'adminCashOrder' : 'adminProof';
   const body = t(DEFAULT_LOCALE, key, {
     ref: order.reference,
     total,

@@ -8,6 +8,9 @@ import { text } from '../bot/messages.js';
 import { notify } from '../bot/notify.js';
 import { REMINDABLE_STATES, STATES, surveyMessage } from '../bot/engine.js';
 import { fallbackName } from '../bot/orders.js';
+import * as cart from '../bot/cart.js';
+import * as loyalty from '../shop/loyalty.js';
+import { notifyAdminProof } from '../bot/orders.js';
 import { sendAlert } from '../mail.js';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -120,6 +123,8 @@ export async function runJobs(now = new Date()) {
   await safely('surveys', surveys);
   await safely('weeklyReminder', () => weeklyReminder(now));
   await safely('waitlistRelease', waitlistRelease);
+  await safely('subscriptions', () => runSubscriptions(now));
+  await safely('winback', () => winback(now));
   await safely('dailyReport', () => dailyReport(now));
   await safely('pruneEvents', () => db.pruneProcessedEvents());
 }
@@ -165,6 +170,129 @@ export async function dailyReport(now = new Date()) {
   db.setSetting(`daily-report:${today}`, new Date().toISOString());
   if (result === 'sent') logger.info(`Daily report emailed for ${today}`);
   return result === 'sent';
+}
+
+/**
+ * Weekly subscriptions: on its weekday, a subscription becomes a real order and
+ * the customer is told, with a chance to cancel. Nothing is charged upfront —
+ * the order goes through the usual payment flow.
+ */
+export async function runSubscriptions(now = new Date()) {
+  const day = now.toLocaleDateString('en-CA');
+  const shop = settings.get();
+  if (!settings.isOpen(now, shop)) return 0;
+
+  let created = 0;
+  for (const sub of db.subscriptionsDue(now.getDay(), day)) {
+    let items = [];
+    try {
+      items = JSON.parse(sub.items || '[]');
+    } catch {
+      items = [];
+    }
+    db.updateSubscription(sub.id, { last_run_day: day });
+    if (!items.length) continue;
+
+    const customer = db.getCustomerById(sub.customer_id);
+    // Skip the week when they already have an order waiting: no double delivery.
+    if (db.openOrdersToday(customer.id).length) continue;
+
+    const priced = cart.priceCart(items);
+    if (!priced.lines.length) continue;
+
+    const locale = normalizeLocale(customer.locale);
+    const zone = db.findZoneByName(customer.neighborhood);
+    const fee = loyalty.deliveryFeeFor(customer.tier, zone ? zone.fee : shop.defaultDeliveryFee, shop);
+    const totals = cart.computeTotals(priced.subtotal, customer.credit, { deliveryFee: fee });
+
+    const order = db.createOrder({
+      customer,
+      items: priced.lines.map((l) => ({
+        productId: l.productId,
+        size: l.size,
+        variantLabel: l.variant?.label_fr || null,
+        extras: l.extras,
+        quantity: l.qty,
+        unitPrice: l.unitPrice,
+      })),
+      ...totals,
+      name: customer.name,
+      neighborhood: customer.neighborhood,
+      addressNote: customer.address_note,
+      slotId: sub.slot_id,
+    });
+    created += 1;
+
+    const summary = priced.lines
+      .map((l) => cart.shortItem(locale, l.product, l.size, l.qty))
+      .join(', ');
+    try {
+      await notify(customer, {
+        message: text(customer.phone, t(locale, 'subscriptionOrder', {
+          ref: order.reference,
+          items: summary,
+          total: money(locale, order.total),
+        })),
+        templateKey: 'orderUpdate',
+        templateParams: [order.reference, t(locale, 'status.awaiting_payment')],
+      });
+    } catch (err) {
+      logger.error(`Subscription message to ${customer.phone} failed:`, err.message);
+    }
+    await notifyAdminProof(order, { subscription: true }).catch(() => {});
+  }
+  if (created) logger.info(`Subscriptions: ${created} order(s) created`);
+  return created;
+}
+
+/**
+ * Win-back: one message to customers who have not ordered for a while, each with
+ * a personal promo code. Runs once a day, and only for customers we can reach.
+ */
+export async function winback(now = new Date()) {
+  const shop = settings.get();
+  if (!shop.winbackEnabled || shop.winbackDiscount <= 0) return 0;
+
+  const day = now.toLocaleDateString('en-CA');
+  if (db.getSetting(`winback:${day}`)) return 0;
+  db.setSetting(`winback:${day}`, new Date().toISOString());
+
+  const expires = new Date(now.getTime() + 14 * 864e5).toLocaleDateString('en-CA');
+  let sent = 0;
+  for (const customer of db.inactiveCustomers(shop.winbackDays, { limit: 30 })) {
+    // One personal, single-use code per customer, so the offer cannot be shared.
+    const code = `RETOUR${String(customer.id).padStart(3, '0')}${Math.random().toString(36).slice(2, 5).toUpperCase()}`;
+    if (db.getCouponByCode(code)) continue;
+    db.createCoupon({
+      code,
+      kind: 'amount',
+      value: shop.winbackDiscount,
+      min_subtotal: 0,
+      max_uses: 1,
+      once_per_customer: 1,
+      expires_on: expires,
+      active: 1,
+    });
+    const locale = normalizeLocale(customer.locale);
+    try {
+      const result = await notify(customer, {
+        message: text(customer.phone, t(locale, 'winback', {
+          name: customer.name,
+          amount: money(locale, shop.winbackDiscount),
+          code,
+          days: 14,
+        })),
+        templateKey: 'weeklyReminder',
+        templateParams: [customer.name || '', code],
+      });
+      if (result === 'sent' || result === 'template') sent += 1;
+    } catch (err) {
+      logger.error(`Win-back to ${customer.phone} failed:`, err.message);
+    }
+    await sleep(300); // stay well inside Meta's per-second limits
+  }
+  if (sent) logger.info(`Win-back: ${sent} customer(s) messaged`);
+  return sent;
 }
 
 export function startScheduler() {

@@ -48,6 +48,9 @@ export function normalizeInbound(m, profileName) {
       return { ...base, mediaId: m.document?.id, text: m.document?.caption || '' };
     case 'audio':
       return { ...base, mediaId: m.audio?.id };
+    // A cart sent from the Meta product catalog.
+    case 'order':
+      return { ...base, order: m.order, text: m.order?.text || '' };
     case 'location':
       return {
         ...base,

@@ -1,18 +1,19 @@
 // Catalogue: products (prices, stock), delivery areas and promo codes.
 import { money } from '../../i18n/index.js';
 import {
-  esc, card, section, empty, badge, table, layout, icon, iconPost, tabs, alert,
+  esc, card, section, empty, badge, table, layout, icon, iconPost, iconAction, tabs, alert,
 } from '../ui.js';
 
 const CATALOGUE_TABS = (L) => [
   ['products', '/admin/products', L.navProducts, 'basket'],
   ['zones', '/admin/zones', L.navZones, 'pin'],
+  ['slots', '/admin/slots', L.navSlots, 'clock'],
   ['coupons', '/admin/coupons', L.navCoupons, 'ticket'],
 ];
 
 /* ------------------------------- products ------------------------------- */
 
-export function productsPage(L, locale, { products, lowStock = [], flash, theme }) {
+export function productsPage(L, locale, { products, lowStock = [], flash, theme , role = 'owner' }) {
   // Each row's <form> lives outside the table and is wired to its inputs with the
   // form="" attribute, so the table markup stays valid and the row stays a row.
   const forms = products
@@ -33,9 +34,11 @@ export function productsPage(L, locale, { products, lowStock = [], flash, theme 
 <td class="num"><input ${f} type="number" name="stock_qty" value="${p.stock_qty ?? ''}" min="0" placeholder="∞" aria-label="${esc(L.stockQty)}"></td>
 <td class="num"><input ${f} type="number" name="stock_alert" value="${p.stock_alert || 0}" min="0" aria-label="${esc(L.stockAlert)}"></td>
 <td class="num"><input ${f} type="number" name="sort_order" value="${p.sort_order}" style="width:4em" aria-label="${esc(L.order)}"></td>
-<td>${p.in_stock ? badge(L.inStock, low ? 'warning' : 'success') : badge(L.outOfStock, 'danger')}</td>
+<td>${p.in_stock ? badge(L.inStock, low ? 'warning' : 'success') : badge(L.outOfStock, 'danger')}
+${p.photo ? badge(L.photo, 'info') : ''}</td>
 <td><div class="row-actions">
 <button ${f} class="icon-btn" data-tip="${esc(L.save)}" aria-label="${esc(L.save)}">${icon('check', 17)}</button>
+${iconAction(`/admin/products/${p.id}/edit`, 'edit', L.editProduct)}
 ${iconPost(`/admin/products/${p.id}/stock`, p.in_stock ? 'eyeOff' : 'eye', p.in_stock ? L.markOut : L.markIn,
     { tone: p.in_stock ? 'danger' : '', fields: { in_stock: p.in_stock ? 0 : 1 } })}
 ${iconPost(`/admin/products/${p.id}/delete`, 'trash', L.delete, { tone: 'danger', confirm: L.confirmDeleteProduct })}
@@ -69,12 +72,12 @@ ${iconPost(`/admin/products/${p.id}/delete`, 'trash', L.delete, { tone: 'danger'
   const body = `${tabs(CATALOGUE_TABS(L), 'products')}${warn}
 <p class="muted">${esc(L.stockHint)}</p>
 <div hidden>${forms}</div>${list}${section(L.addProduct, add)}`;
-  return layout(L, { title: L.products, active: 'products', body, flash, theme });
+  return layout(L, { role, title: L.products, active: 'products', body, flash, theme });
 }
 
 /* --------------------------- delivery zones ----------------------------- */
 
-export function zonesPage(L, locale, { zones, flash, theme }) {
+export function zonesPage(L, locale, { zones, flash, theme , role = 'owner' }) {
   const forms = zones.map((z) => `<form id="zone-${z.id}" method="post" action="/admin/zones/${z.id}"></form>`).join('');
   const rows = zones
     .map((z) => {
@@ -103,14 +106,14 @@ ${iconPost(`/admin/zones/${z.id}/delete`, 'trash', L.delete, { tone: 'danger', c
 </form>`, { head: `${icon('plus')}<h2>${esc(L.addZone)}</h2>` });
 
   const body = `${tabs(CATALOGUE_TABS(L), 'zones')}<p class="muted">${esc(L.zonesHint)}</p>${list}${section(L.addZone, add)}`;
-  return layout(L, { title: L.zones, active: 'zones', body, flash, theme });
+  return layout(L, { role, title: L.zones, active: 'zones', body, flash, theme });
 }
 
 /* ------------------------------- coupons -------------------------------- */
 
 const KINDS = ['amount', 'percent', 'free_delivery'];
 
-export function couponsPage(L, locale, { coupons, flash, theme }) {
+export function couponsPage(L, locale, { coupons, flash, theme , role = 'owner' }) {
   const kindOptions = (selected) =>
     KINDS.map((k) => `<option value="${k}"${k === selected ? ' selected' : ''}>${esc(L.couponKinds[k])}</option>`).join('');
 
@@ -163,5 +166,5 @@ ${iconPost(`/admin/coupons/${c.id}/delete`, 'trash', L.delete, { tone: 'danger',
 
   const body = `${tabs(CATALOGUE_TABS(L), 'coupons')}<p class="muted">${esc(L.couponsHint)}</p>
 <div hidden>${forms}</div>${list}${section(L.addCoupon, add)}`;
-  return layout(L, { title: L.coupons, active: 'coupons', body, flash, theme });
+  return layout(L, { role, title: L.coupons, active: 'coupons', body, flash, theme });
 }

@@ -39,6 +39,20 @@ export const list = (to, body, buttonLabel, options, footer) => ({
   })),
 });
 
+/** A picture, e.g. a product photo sent with the size question. */
+export const image = (to, link, caption) => ({ kind: 'image', to, link, caption: caption ? clip(caption, 900) : undefined });
+
+/** The Meta product catalog, rendered natively by WhatsApp. */
+export const productList = (to, { catalogId, header, body, footer, sections }) => ({
+  kind: 'product_list',
+  to,
+  catalogId,
+  header: clip(header, 60),
+  body: clip(body, 1024),
+  footer: footer ? clip(footer, 60) : undefined,
+  sections,
+});
+
 export const template = (to, name, language, params = []) => ({ kind: 'template', to, name, language, params });
 
 /**
@@ -63,6 +77,10 @@ export function summarize(msg) {
       return `${msg.body}\n[${msg.buttons.map((b) => b.title).join('] [')}]`;
     case 'list':
       return `${msg.body}\n[${msg.rows.map((r) => r.title).join(' | ')}]`;
+    case 'image':
+      return `(image) ${msg.caption || msg.link}`;
+    case 'product_list':
+      return `${msg.body}\n[${msg.sections.flatMap((sec) => sec.items).join(' | ')}]`;
     case 'template':
       return `(template ${msg.name}) ${msg.params.join(' · ')}`;
     default:

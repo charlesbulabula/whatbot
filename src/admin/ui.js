@@ -5,6 +5,8 @@ import { money } from '../i18n/index.js';
 import * as db from '../db/index.js';
 import * as settings from '../shop/settings.js';
 import { CSS, FONT_LINK, FAVICON, icon } from './theme.js';
+import { vapid } from '../pwa.js';
+import { can as roleCan } from '../shop/staff.js';
 
 export const esc = (v) =>
   String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -137,26 +139,34 @@ export const filterChips = (chips) =>
 /* -------------------------------- layout -------------------------------- */
 
 const NAV = (L) => [
-  { group: '', items: [
+  { area: 'orders', group: '', items: [
     ['orders', '/admin', L.navOrders, 'receipt'],
     ['route', '/admin/route', L.navRoute, 'scooter'],
   ] },
-  { group: L.navGroupCatalogue, items: [
+  { area: 'catalogue', group: L.navGroupCatalogue, items: [
     ['products', '/admin/products', L.navProducts, 'basket'],
     ['zones', '/admin/zones', L.navZones, 'pin'],
+    ['slots', '/admin/slots', L.navSlots, 'clock'],
     ['coupons', '/admin/coupons', L.navCoupons, 'ticket'],
   ] },
-  { group: L.navGroupCustomers, items: [
+  { area: 'customers', group: L.navGroupCustomers, items: [
     ['customers', '/admin/customers', L.navCustomers, 'users'],
     ['loyalty', '/admin/loyalty', L.navLoyalty, 'gift'],
+    ['subscriptions', '/admin/subscriptions', L.navSubscriptions, 'refresh'],
+  ] },
+  { area: 'marketing', group: L.navGroupMarketing, items: [
     ['broadcast', '/admin/broadcast', L.navBroadcast, 'megaphone'],
   ] },
-  { group: L.navGroupAnalysis, items: [
+  { area: 'money', group: L.navGroupAnalysis, items: [
     ['stats', '/admin/stats', L.navStats, 'chart'],
     ['expenses', '/admin/expenses', L.navExpenses, 'wallet'],
+    ['accounting', '/admin/accounting', L.navAccounting, 'file'],
   ] },
-  { group: L.navGroupShop, items: [
+  { area: 'settings', group: L.navGroupShop, items: [
     ['settings', '/admin/settings', L.navSettings, 'settings'],
+    ['staff', '/admin/staff', L.navStaff, 'key'],
+  ] },
+  { area: 'audit', group: '', items: [
     ['audit', '/admin/audit', L.navAudit, 'history'],
   ] },
 ];
@@ -178,12 +188,22 @@ function navCounts() {
  * The page shell. `active` is the sidebar key, `title` shows in the header and
  * the tab, `theme` is the saved light/dark choice ('' = follow the device).
  */
-export function layout(L, { title, active, body, flash, flashTone = '', theme = '', search = '' }) {
+export function layout(L, { title, active, body, flash, flashTone = '', theme = '', search = '', role = 'owner' }) {
+  const can = (area) => roleCan(role, area);
+  // The push key is generated on first use and then stable, so every page can
+  // offer notifications without the router threading it through.
+  let vapidPublicKey = '';
+  try {
+    vapidPublicKey = vapid().publicKey;
+  } catch {
+    vapidPublicKey = '';
+  }
   const shop = settings.get();
   const open = settings.isOpen(new Date(), shop);
   const counts = navCounts();
 
   const nav = NAV(L)
+    .filter(({ area }) => can(area))
     .map(({ group, items }) => {
       const links = items
         .map(([key, href, label, name]) => {
@@ -208,6 +228,7 @@ ${avatar(shop.name, '', { size: '32px' })}</button>
   <div class="menu__sep"></div>
   <a class="menu__item" role="menuitem" href="/admin/audit">${icon('history', 17)}${esc(L.navAudit)}</a>
   <a class="menu__item" role="menuitem" href="/admin/backup">${icon('download', 17)}${esc(L.downloadBackup)}</a>
+  <button class="menu__item" role="menuitem" id="enable-push" type="button">${icon('bell', 17)}${esc(L.enablePush)}</button>
   <div class="menu__sep"></div>
   <a class="menu__item" role="menuitem" href="/admin/logout">${icon('logout', 17)}${esc(L.logout)}</a>
 </div></div>`;
@@ -215,6 +236,9 @@ ${avatar(shop.name, '', { size: '32px' })}</button>
   return `<!doctype html><html lang="${L.lang}"${theme ? ` data-bs-theme="${theme}"` : ''}><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex">
 <meta name="color-scheme" content="light dark"><title>${esc(title)} · ${esc(shop.name)}</title>
+<link rel="manifest" href="/manifest.webmanifest"><link rel="apple-touch-icon" href="/icon.svg">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="${esc(shop.name)}">
 ${FAVICON}${FONT_LINK}<style>${CSS}</style></head><body><div class="hk-wrapper">
 <input type="checkbox" id="hk-toggle" tabindex="-1" aria-hidden="true">
 <aside class="hk-nav">
@@ -239,7 +263,7 @@ ${FAVICON}${FONT_LINK}<style>${CSS}</style></head><body><div class="hk-wrapper">
 ${flash ? alert(esc(flash), flashTone, flashTone === 'danger' ? 'alert' : 'check') : ''}
 ${!open ? alert(`${esc(L.closedBanner)} <a href="/admin/settings">${esc(L.closedBannerLink)}</a>`, 'warning', 'clock') : ''}
 ${body}</main></div>
-${shellScript(theme)}</body></html>`;
+${shellScript(theme)}${pushScript(vapidPublicKey)}</body></html>`;
 }
 
 /**
@@ -289,12 +313,49 @@ else{setInterval(function(){if(!busy())location.reload()},${fallbackSeconds * 10
 })();</script>`;
 }
 
+/**
+ * Installs the service worker, and wires the "notify me" item of the account
+ * menu to the Push API. Everything degrades quietly on a browser without it.
+ */
+function pushScript(publicKey) {
+  if (!publicKey) return '';
+  return `<script>(function(){
+if(!('serviceWorker' in navigator))return;
+navigator.serviceWorker.register('/sw.js').catch(function(){});
+var btn=document.getElementById('enable-push');if(!btn||!('PushManager' in window))return;
+function b64(s){var p='='.repeat((4-s.length%4)%4),b=atob((s+p).replace(/-/g,'+').replace(/_/g,'/'));
+ return Uint8Array.from(b,function(c){return c.charCodeAt(0)});}
+btn.addEventListener('click',function(e){e.stopPropagation();
+ Notification.requestPermission().then(function(perm){
+  if(perm!=='granted')return;
+  navigator.serviceWorker.ready.then(function(reg){
+   return reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:b64(${JSON.stringify(publicKey)})});
+  }).then(function(sub){
+   return fetch('/admin/push/subscribe',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(sub)});
+  }).then(function(){btn.textContent='✅';}).catch(function(){});
+ });});
+})();</script>`;
+}
+
 /* ------------------------------ formatting ------------------------------ */
 
 export const fmtMoney = (locale, amount) => money(locale, amount);
 
 export const productLabel = (p, locale) =>
   `${p.emoji ? `${esc(p.emoji)} ` : ''}${esc(locale === 'en' ? p.name_en : p.name_fr)}`;
+
+/** Variant name of an order line: what it was sold as, or the default size name. */
+export const variantName = (L, item) => item.variant_label || L.sizes[item.size] || item.size;
+
+/** "préparé, nettoyé" for an order line, or an empty string. */
+export function extrasName(item) {
+  if (!item.extras) return '';
+  try {
+    return JSON.parse(item.extras).map((e) => e.label).filter(Boolean).join(', ');
+  } catch {
+    return '';
+  }
+}
 
 export const utcTime = (value, locale, opts = { hour: '2-digit', minute: '2-digit' }) =>
   new Date(`${String(value).replace(' ', 'T')}Z`).toLocaleTimeString(locale === 'en' ? 'en-GB' : 'fr-FR', opts);
