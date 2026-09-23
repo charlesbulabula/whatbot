@@ -242,6 +242,20 @@ Coût indicatif (architecture §3.1) : ~0,004-0,005 $ par message utilitaire hor
   reste « en attente de paiement » jusqu'à ce que tu la confirmes ; le tableau de bord affiche
   le total d'espèces à encaisser sur la journée, et la feuille de route du livreur le détail.
 
+## Passer au vrai compte WhatsApp Business
+
+Le bot tourne aujourd'hui sur le **numéro de test** de Meta (5 destinataires
+maximum, jeton qui expire toutes les 24 h). La procédure complète pour passer à
+un vrai numéro est dans **[docs/meta-setup.md](docs/meta-setup.md)**.
+
+En résumé : vérifier l'entreprise, ajouter le vrai numéro, créer un jeton
+permanent d'utilisateur système, pointer le webhook, puis lancer le workflow
+**Meta - setup** :
+
+- `mode: check` — ne modifie rien et liste précisément ce qui manque ;
+- `mode: apply` — abonne le compte WhatsApp à l'app et soumet les six modèles
+  de message en français et en anglais.
+
 ## Diagnostic
 
 ```bash
