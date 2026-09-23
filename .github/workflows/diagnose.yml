@@ -23,6 +23,9 @@ jobs:
           echo "== service"; systemctl is-active whatbot
           echo "== recent log"; journalctl -u whatbot -n 60 --no-pager -o cat
           echo "== nginx webhook hits (last 20)"; grep -h '/webhook' /var/log/nginx/whatbot.access.log 2>/dev/null | tail -20 | awk '{print $4, $6, $7, $9}'
+          echo "== all recent requests to the bot (last 15)"; tail -15 /var/log/nginx/whatbot.access.log 2>/dev/null | awk '{print $1, $4, $6, $7, $9}'
+          echo "== nginx errors (last 10)"; tail -10 /var/log/nginx/whatbot.error.log 2>/dev/null
+          echo "== self-test: unsigned POST must be refused with 401"; curl -s -o /dev/null -w '%{http_code}\n' -X POST -H 'content-type: application/json' -d '{}' https://bot.ll-aca.site/webhook
           echo "== database"
           cd /opt/whatbot && node -e "
             const D=require('better-sqlite3'); const db=new D('data/whatbot.db',{readonly:true});
