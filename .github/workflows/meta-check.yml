@@ -1,0 +1,38 @@
+# Read-only report of how Meta routes webhooks for this app (no secret is printed).
+name: Meta - check webhook routing
+
+on:
+  workflow_dispatch:
+    inputs:
+      app_id:
+        description: Meta app ID
+        default: '1803892427276261'
+      waba_id:
+        description: WhatsApp Business Account ID
+        default: '3424779654392612'
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          WA_TOKEN: ${{ secrets.WA_TOKEN }}
+          WA_APP_SECRET: ${{ secrets.WA_APP_SECRET }}
+          WA_PHONE_NUMBER_ID: ${{ secrets.WA_PHONE_NUMBER_ID }}
+          APP: ${{ inputs.app_id }}
+          WABA: ${{ inputs.waba_id }}
+        run: |
+          g=https://graph.facebook.com/v21.0
+          echo "== app webhook subscriptions (app token)"
+          curl -s "$g/$APP/subscriptions?access_token=$APP|$WA_APP_SECRET"; echo
+          echo "== WABA subscribed apps"
+          curl -s -H "Authorization: Bearer $WA_TOKEN" "$g/$WABA/subscribed_apps"; echo
+          echo "== phone numbers of the WABA"
+          curl -s -H "Authorization: Bearer $WA_TOKEN" "$g/$WABA/phone_numbers?fields=id,display_phone_number,verified_name,status,platform_type,webhook_configuration"; echo
+          echo "== configured phone number id matches one of them?"
+          curl -s -H "Authorization: Bearer $WA_TOKEN" "$g/$WABA/phone_numbers?fields=id" | grep -q "\"$WA_PHONE_NUMBER_ID\"" && echo yes || echo NO
+          echo "== token debug (validity and scopes only)"
+          curl -s "$g/debug_token?input_token=$WA_TOKEN&access_token=$APP|$WA_APP_SECRET" | python3 -c "import sys,json; d=json.load(sys.stdin).get('data',{}); print({k:d.get(k) for k in ('app_id','is_valid','expires_at','scopes','type')}, d.get('error'))"
