@@ -50,6 +50,9 @@ export const config = {
     momoAirtel: process.env.MOMO_AIRTEL || '',
     momoHolder: process.env.MOMO_HOLDER || '',
     adminNotifyNumber: (process.env.ADMIN_NOTIFY_NUMBER || '').replace(/\D/g, ''),
+    // Default opening hours until they are set from the dashboard: "24/7", or a
+    // JSON object keyed by weekday, e.g. {"0":null,"1":{"open":"08:00","close":"18:00"}}.
+    hours: process.env.SHOP_HOURS || '',
   },
 
   loyalty: {
@@ -74,6 +77,18 @@ export const config = {
   geo: {
     // Reverse-geocode shared locations with OpenStreetMap Nominatim to detect the delivery zone.
     enabled: bool(process.env.GEOCODING_ENABLED, true) && process.env.NODE_ENV !== 'test',
+  },
+
+  // Email alerts. The server is a deployment secret; the recipient and the
+  // on/off switch are editable from the dashboard.
+  smtp: {
+    host: process.env.SMTP_HOST || '',
+    port: int(process.env.SMTP_PORT, 587),
+    secure: process.env.SMTP_SECURE === undefined ? undefined : bool(process.env.SMTP_SECURE),
+    user: process.env.SMTP_USER || '',
+    pass: process.env.SMTP_PASS || '',
+    from: process.env.SMTP_FROM || '',
+    to: process.env.ALERT_EMAIL || '',
   },
 
   admin: {

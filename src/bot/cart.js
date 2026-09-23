@@ -35,12 +35,18 @@ export function priceCart(cart) {
   return { lines, unavailable, subtotal: lines.reduce((sum, l) => sum + l.lineTotal, 0) };
 }
 
-/** Credit is spent up to the full amount due, delivery included. */
-export function computeTotals(subtotal, availableCredit) {
-  const deliveryFee = subtotal > 0 ? config.shop.deliveryFee : 0;
-  const gross = subtotal + deliveryFee;
-  const discount = Math.min(Math.max(availableCredit || 0, 0), gross);
-  return { subtotal, deliveryFee, discount, total: gross - discount };
+/**
+ * A coupon comes off first, then loyalty credit on what is left, both capped at
+ * the amount due. `deliveryFee` is the fee of the delivery area (see db.listZones);
+ * without one the flat DELIVERY_FEE is used, which is what fresh installs have.
+ */
+export function computeTotals(subtotal, availableCredit, { deliveryFee, couponDiscount = 0 } = {}) {
+  const fee = subtotal > 0 ? Math.max(0, deliveryFee ?? config.shop.deliveryFee) : 0;
+  const gross = subtotal + fee;
+  const coupon = Math.min(Math.max(couponDiscount || 0, 0), gross);
+  const afterCoupon = gross - coupon;
+  const discount = Math.min(Math.max(availableCredit || 0, 0), afterCoupon);
+  return { subtotal, deliveryFee: fee, couponDiscount: coupon, discount, total: afterCoupon - discount };
 }
 
 /** Rebuilds a cart from a past order, keeping only products that are still in stock. */

@@ -2,6 +2,7 @@
 import { config } from '../config.js';
 import { logger } from '../utils/logger.js';
 import * as db from '../db/index.js';
+import * as settings from '../shop/settings.js';
 import { t, normalizeLocale } from '../i18n/index.js';
 import { text } from '../bot/messages.js';
 import { notify } from '../bot/notify.js';
@@ -88,7 +89,7 @@ export async function weeklyReminder(now = new Date()) {
 export async function waitlistRelease() {
   const waiting = db.waitlistedCustomers();
   if (!waiting.length) return;
-  const cap = config.automation.weeklyStockCapacity;
+  const cap = settings.get().weeklyCapacity;
   const free = cap > 0 ? cap - db.weeklyOrderCount() : waiting.length;
   for (const c of waiting.slice(0, Math.max(free, 0))) {
     db.updateCustomer(c.id, { waitlist_since: null });

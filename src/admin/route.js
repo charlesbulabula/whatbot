@@ -9,6 +9,7 @@ import { DEFAULT_LOCALE, money } from '../i18n/index.js';
 import { changeOrderStatus } from '../bot/orders.js';
 import { adminDictionaries } from './i18n.js';
 import { esc } from './views.js';
+import { CSS, FONT_LINK, icon } from './theme.js';
 
 const TO_DELIVER = ['paid', 'preparing', 'on_the_way'];
 const MAX_AGE_DAYS = 2; // links for older days stop working
@@ -51,19 +52,25 @@ export function riderCards(L, orders, { actionBase } = {}) {
         .map((it) => `<li>${esc(it.emoji)} ${esc(locale === 'en' ? it.name_en : it.name_fr)} — ${esc(L.sizes[it.size])} × ${it.quantity}</li>`)
         .join('');
       const done = o.status === 'delivered';
+      const cash = o.payment_method === 'cash' && !done;
       const actions = !actionBase || done ? '' : `<div class="actions">
-${o.status !== 'on_the_way' ? `<form method="post" action="${actionBase}/orders/${o.id}" class="inline"><input type="hidden" name="status" value="on_the_way"><button>${esc(L.route.onTheWay)}</button></form>` : ''}
-<form method="post" action="${actionBase}/orders/${o.id}" class="inline" onsubmit="return confirm('${esc(L.route.confirmDelivered)}')"><input type="hidden" name="status" value="delivered"><button class="primary">${esc(L.route.delivered1)}</button></form></div>`;
-      return `<div class="card"${done ? ' style="opacity:.55"' : ''}>
-<div class="row"><b>${esc(o.customer_name || '')}</b><span class="chip s-${esc(o.status)}">${esc(L.status[o.status])}</span></div>
+${o.status !== 'on_the_way' ? `<form method="post" action="${actionBase}/orders/${o.id}" class="inline"><input type="hidden" name="status" value="on_the_way"><button class="btn">${esc(L.route.onTheWay)}</button></form>` : ''}
+<form method="post" action="${actionBase}/orders/${o.id}" class="inline" onsubmit="return confirm('${esc(L.route.confirmDelivered)}')"><input type="hidden" name="status" value="delivered"><button class="btn btn--primary">${esc(L.route.delivered1)}</button></form></div>`;
+      // Money line: a cash order tells the rider exactly what to collect.
+      const payment = cash
+        ? `<div class="badge badge--warning" style="font-size:.875rem">${esc(L.route.collect)} ${esc(money(locale, o.total))}</div>`
+        : `<div class="muted">${esc(L.route.prepaid)} (${esc(money(locale, o.total))})</div>`;
+      return `<div class="card"${done ? ' style="opacity:.55"' : ''}><div class="card__body">
+<div class="actions"><b class="strong">${esc(o.customer_name || '')}</b><span class="spacer"></span>
+<span class="badge badge--${o.status === 'delivered' ? 'success' : o.status === 'on_the_way' ? 'primary' : 'info'}">${esc(L.status[o.status])}</span></div>
 <div class="muted">${esc(o.reference)}</div>
-<div>📍 <b>${esc(o.neighborhood || '')}</b> — ${esc(String(o.address_note || '').replace(/📍?\s*https?:\/\/\S+/g, '').trim())}</div>
+<div>${icon('pin', 15)} <b class="strong">${esc(o.neighborhood || '')}</b> — ${esc(String(o.address_note || '').replace(/📍?\s*https?:\/\/\S+/g, '').trim())}</div>
 <ul>${items}</ul>
-<div class="muted">✅ ${esc(L.route.prepaid)} (${esc(money(locale, o.total))})</div>
-<div class="actions"><a class="btn" href="tel:+${esc(o.customer.phone)}">${esc(L.route.call)}</a>
-<a class="btn" href="https://wa.me/${esc(o.customer.phone)}" target="_blank" rel="noopener noreferrer">${esc(L.route.whatsapp)}</a>
-<a class="btn" href="${esc(mapsLink(o))}" target="_blank" rel="noopener noreferrer">${esc(L.route.map)}</a></div>
-${actions}</div>`;
+${payment}
+<div class="actions"><a class="btn btn--sm" href="tel:+${esc(o.customer.phone)}">${esc(L.route.call)}</a>
+<a class="btn btn--sm" href="https://wa.me/${esc(o.customer.phone)}" target="_blank" rel="noopener noreferrer">${esc(L.route.whatsapp)}</a>
+<a class="btn btn--sm" href="${esc(mapsLink(o))}" target="_blank" rel="noopener noreferrer">${esc(L.route.map)}</a></div>
+${actions}</div></div>`;
     })
     .join('');
 }
@@ -78,19 +85,20 @@ export function ordersForRoute(day) {
 
 function riderPage(L, day, base, flash) {
   const { pending, delivered } = ordersForRoute(day);
-  const style = `:root{--bg:#f6f4ef;--card:#fff;--ink:#1f1d1a;--muted:#6b6660;--line:#e4dfd6;--accent:#b4451f;--accent-ink:#fff;--chip:#efe9df;--ok:#2f7d4a;--warn:#a86a00}
-@media (prefers-color-scheme:dark){:root{--bg:#161412;--card:#201d1a;--ink:#f1ece4;--muted:#a59e94;--line:#34302b;--accent:#e0714a;--accent-ink:#1a1512;--chip:#2c2824;--ok:#6cc08a;--warn:#e2b04a}}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.45 system-ui,sans-serif}main{max-width:640px;margin:0 auto;padding:16px}
-.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:12px}.row{display:flex;justify-content:space-between;gap:8px}
-.muted{color:var(--muted)}.chip{padding:2px 8px;border-radius:999px;background:var(--chip);font-size:.8rem;font-weight:600}.s-delivered{color:var(--ok)}.s-on_the_way{color:var(--accent)}.s-paid,.s-preparing{color:var(--warn)}
-.actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}.btn,button{font:inherit;font-weight:600;border:1px solid var(--line);background:var(--chip);color:var(--ink);border-radius:10px;padding:10px 12px;text-decoration:none;cursor:pointer}
-button.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}form.inline{display:inline}ul{padding-left:18px;margin:.4rem 0}
-.flash{background:var(--chip);border-left:4px solid var(--accent);padding:10px 12px;border-radius:8px;margin-bottom:12px}`;
+  const toCollect = pending
+    .filter((o) => o.payment_method === 'cash')
+    .reduce((sum, o) => sum + o.total, 0);
   return `<!doctype html><html lang="${L.lang}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="robots" content="noindex"><title>${esc(L.route.title)} ${esc(day)}</title><style>${style}</style></head><body><main>
-<h1>🛵 ${esc(L.route.title)} — ${esc(day)}</h1>${flash ? `<div class="flash">${esc(flash)}</div>` : ''}
-<h2>${esc(L.route.toDeliver)} (${pending.length})</h2>${pending.length ? riderCards(L, pending, { actionBase: base }) : `<p class="muted">${esc(L.route.empty)}</p>`}
-${delivered.length ? `<h2>${esc(L.route.delivered)} (${delivered.length})</h2>${riderCards(L, delivered)}` : ''}
+<meta name="robots" content="noindex"><meta name="color-scheme" content="light dark">
+<title>${esc(L.route.title)} ${esc(day)}</title>${FONT_LINK}<style>${CSS}
+.hk-page{margin:0;padding:1.25rem;max-width:640px;margin-inline:auto}</style></head><body>
+<main class="hk-page">
+<h1>${icon('scooter', 24)} ${esc(L.route.title)} — ${esc(day)}</h1>
+${flash ? `<div class="alert" style="margin-top:1rem">${icon('info')}<span>${esc(flash)}</span></div>` : ''}
+${toCollect ? `<div class="alert alert--warning" style="margin-top:1rem">${icon('wallet')}<span>${esc(L.route.collectTotal)} <b>${esc(money(L.lang, toCollect))}</b></span></div>` : ''}
+<section class="section"><div class="section__title"><h2>${esc(L.route.toDeliver)} (${pending.length})</h2></div>
+${pending.length ? riderCards(L, pending, { actionBase: base }) : `<div class="card"><div class="card__body"><p class="muted">${esc(L.route.empty)}</p></div></div>`}</section>
+${delivered.length ? `<section class="section"><div class="section__title"><h2>${esc(L.route.delivered)} (${delivered.length})</h2></div>${riderCards(L, delivered)}</section>` : ''}
 </main></body></html>`;
 }
 

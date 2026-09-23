@@ -6,6 +6,7 @@
 #   WA_VERIFY_TOKEN  any word you choose, pasted in Meta's webhook form (required)
 #   WA_PHONE_NUMBER_ID, WA_TOKEN, WA_APP_SECRET, WA_BUSINESS_NUMBER     (from Meta)
 #   MOMO_ORANGE, MOMO_AIRTEL, MOMO_HOLDER, ADMIN_NOTIFY_NUMBER          (shop settings)
+#   SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_FROM, ALERT_EMAIL  (optional: email alerts)
 #   ANTHROPIC_API_KEY                                                   (optional: free-text orders)
 #   VPS_HOST (default 72.62.238.174), repository variable DOMAIN (default bot.ll-aca.site)
 #
@@ -82,5 +83,11 @@ jobs:
           WHATBOT_MOMO_AIRTEL: ${{ secrets.MOMO_AIRTEL }}
           WHATBOT_MOMO_HOLDER: ${{ secrets.MOMO_HOLDER }}
           WHATBOT_ADMIN_NOTIFY_NUMBER: ${{ secrets.ADMIN_NOTIFY_NUMBER }}
+          WHATBOT_SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          WHATBOT_SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          WHATBOT_SMTP_USER: ${{ secrets.SMTP_USER }}
+          WHATBOT_SMTP_PASS: ${{ secrets.SMTP_PASS }}
+          WHATBOT_SMTP_FROM: ${{ secrets.SMTP_FROM }}
+          WHATBOT_ALERT_EMAIL: ${{ secrets.ALERT_EMAIL }}
           WHATBOT_ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: ./deploy/deploy.sh

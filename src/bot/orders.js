@@ -7,6 +7,9 @@ import * as db from '../db/index.js';
 import { t, money, normalizeLocale, DEFAULT_LOCALE } from '../i18n/index.js';
 import { text } from './messages.js';
 import { notify } from './notify.js';
+import { publish } from '../utils/events.js';
+import { sendAlert } from '../mail.js';
+import * as settings from '../shop/settings.js';
 import { downloadMedia } from '../whatsapp/client.js';
 
 const STATUS_MESSAGE = {
@@ -48,6 +51,7 @@ export async function changeOrderStatus(orderId, status, { eta } = {}) {
     });
   }
   if (firstPayment) await rewardsAfterPayment(order);
+  publish('status', { reference: order.reference, status });
   return { order, notified };
 }
 
@@ -93,16 +97,30 @@ export async function rewardsAfterPayment(order) {
   }
 }
 
+/**
+ * Alerts the shop on WhatsApp and, when SMTP is configured, by email too.
+ * Email matters because WhatsApp refuses free-form messages outside the 24h
+ * window: without a template, the owner would otherwise miss the alert.
+ */
 export async function notifyAdmin(body, templateParams = []) {
-  const phone = config.shop.adminNotifyNumber;
-  if (!phone) return 'skipped';
+  const email = sendAlert({ subject: body.split('\n')[0].slice(0, 120), text: body });
+  const phone = settings.get().adminNotifyNumber;
+  if (!phone) {
+    await email;
+    return 'skipped';
+  }
   const admin = db.getCustomer(phone) || { phone, locale: DEFAULT_LOCALE, last_seen_at: null };
-  return safeNotify(admin, { message: text(phone, body), templateKey: 'adminAlert', templateParams });
+  const [result] = await Promise.all([
+    safeNotify(admin, { message: text(phone, body), templateKey: 'adminAlert', templateParams }),
+    email,
+  ]);
+  return result;
 }
 
-export function notifyAdminProof(order, { paidByCredit = false } = {}) {
+export function notifyAdminProof(order, { paidByCredit = false, cash = false } = {}) {
   const total = money(DEFAULT_LOCALE, order.total);
-  const body = t(DEFAULT_LOCALE, paidByCredit ? 'adminPaidByCredit' : 'adminProof', {
+  const key = paidByCredit ? 'adminPaidByCredit' : cash ? 'adminCashOrder' : 'adminProof';
+  const body = t(DEFAULT_LOCALE, key, {
     ref: order.reference,
     total,
     name: order.customer_name,

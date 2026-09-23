@@ -10,6 +10,7 @@ process.env.ADMIN_PASSWORD = 'pw';
 
 const { app } = await import('../src/index.js');
 const db = await import('../src/db/index.js');
+const settings = await import('../src/shop/settings.js');
 
 let server;
 let base;
@@ -102,7 +103,8 @@ test('admin can take over a conversation, reply inside the 24h window, and hand 
   assert.equal((await post(`/admin/customers/${customer.id}/takeover`)).status, 302);
   assert.equal(db.getConversation(phone).state, 'HUMAN');
   const dash = await (await fetch(`${base}/admin`, { headers: { authorization: auth } })).text();
-  assert.match(dash, /Clients qui attendent une personne \(1\)/);
+  assert.match(dash, /Clients qui attendent une personne/);
+  assert.match(dash, /badge badge--danger">1</); // the handoff count badge
 
   const reply = await post(`/admin/customers/${customer.id}/reply`, 'body=' + encodeURIComponent('Oui, nous livrons à Masina 🙂'));
   assert.match(decodeURIComponent(reply.headers.get('location')), /Message envoyé/);
@@ -186,6 +188,116 @@ test('stats page renders every period, and the CSV export opens in Excel', async
   const text = bytes.toString('utf8');
   assert.match(text, /^\uFEFFreference;date;status;customer/);
   assert.match(text, /Rider Test/);
+});
+
+test('the shop pages manage areas, promo codes and settings', async () => {
+  const get = async (path) => {
+    const res = await fetch(`${base}${path}`, { headers: { authorization: auth } });
+    assert.equal(res.status, 200, path);
+    return res.text();
+  };
+  const post = (path, body) =>
+    fetch(`${base}${path}`, {
+      method: 'POST',
+      redirect: 'manual',
+      headers: { authorization: auth, origin: base, 'content-type': 'application/x-www-form-urlencoded' },
+      body,
+    });
+
+  // Every page in the sidebar answers, in both themes and both languages.
+  for (const path of ['/admin/zones', '/admin/coupons', '/admin/settings', '/admin/products', '/admin/customers']) {
+    const html = await get(path);
+    assert.match(html, /data-bs-theme|prefers-color-scheme/, `${path} ships the theme tokens`);
+  }
+
+  assert.equal((await post('/admin/zones', 'name=Masina&fee=4000')).status, 302);
+  const zone = db.findZoneByName('masina');
+  assert.equal(zone.fee, 4000);
+  assert.equal(zone.active, 1);
+  assert.match(await get('/admin/zones'), /Masina/);
+
+  // A duplicate area is refused rather than silently creating a second one.
+  await post('/admin/zones', 'name=MASINA&fee=1000');
+  assert.equal(db.listZones().filter((z) => /masina/i.test(z.name)).length, 1);
+
+  assert.equal((await post('/admin/zones/' + zone.id, 'name=Masina&fee=4500&active=1&sort_order=2')).status, 302);
+  assert.equal(db.getZone(zone.id).fee, 4500);
+
+  assert.equal((await post('/admin/coupons', 'code=promo15&kind=percent&value=15&min_subtotal=5000')).status, 302);
+  const coupon = db.getCouponByCode('PROMO15');
+  assert.equal(coupon.kind, 'percent');
+  assert.equal(coupon.value, 15);
+  assert.match(await get('/admin/coupons'), /PROMO15/);
+
+  // The code itself is never renamed by an edit, only its rules change.
+  await post(`/admin/coupons/${coupon.id}`, 'code=AUTRECODE&kind=amount&value=800&active=1&once_per_customer=1');
+  assert.equal(db.getCoupon(coupon.id).code, 'PROMO15');
+  assert.equal(db.getCoupon(coupon.id).value, 800);
+
+  assert.equal((await post(`/admin/coupons/${coupon.id}/delete`, '')).status, 302);
+  assert.equal(db.getCouponByCode('PROMO15'), null);
+
+  const form = new URLSearchParams({
+    name: 'Epices Test', minOrder: '2500', defaultDeliveryFee: '2000', weeklyCapacity: '0',
+    momoEnabled: '1', momoOrange: '+243 899 00 00 00', momoHolder: 'Charles B.',
+    cashEnabled: '1', adminNotifyNumber: '243899000000',
+    open_1: '1', from_1: '08:00', to_1: '18:00',
+  });
+  assert.equal((await post('/admin/settings', form.toString())).status, 302);
+  const saved = settings.get();
+  assert.equal(saved.minOrder, 2500);
+  assert.equal(saved.momoOrange, '243899000000');
+  assert.equal(saved.cashEnabled, true);
+  assert.deepEqual(saved.hours[1], { open: '08:00', close: '18:00' });
+  assert.equal(saved.hours[2], null, 'a day left unticked is closed');
+
+  // Put the shop back to always-open so the rest of the file is time-independent.
+  settings.save({ minOrder: 0, hours: Object.fromEntries([0, 1, 2, 3, 4, 5, 6].map((d) => [d, { open: '00:00', close: '23:59' }])) });
+});
+
+test('the theme toggle stores an explicit choice', async () => {
+  const res = await fetch(`${base}/admin/theme?to=light`, {
+    headers: { authorization: auth }, redirect: 'manual',
+  });
+  assert.equal(res.status, 302);
+  assert.match(res.headers.get('set-cookie'), /admin_theme=light/);
+
+  const page = await fetch(`${base}/admin`, { headers: { authorization: auth, cookie: 'admin_theme=light' } });
+  assert.match(await page.text(), /<html lang="fr" data-bs-theme="light">/);
+});
+
+test('live updates: the dashboard receives pushed events over SSE', async () => {
+  const controller = new AbortController();
+  const res = await fetch(`${base}/admin/events`, {
+    headers: { authorization: auth, accept: 'text/event-stream' },
+    signal: controller.signal,
+  });
+  assert.equal(res.status, 200);
+  assert.match(res.headers.get('content-type'), /text\/event-stream/);
+  assert.equal(res.headers.get('x-accel-buffering'), 'no', 'Nginx must not buffer the stream');
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  const first = decoder.decode((await reader.read()).value);
+  assert.match(first, /retry: \d+/, 'the browser is told how long to wait before reconnecting');
+
+  const { publish } = await import('../src/utils/events.js');
+  publish('order', { reference: 'CMD-TEST-001' });
+
+  let received = '';
+  while (!received.includes('CMD-TEST-001')) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    received += decoder.decode(value);
+  }
+  assert.match(received, /event: update/);
+  assert.match(received, /"type":"order"/);
+
+  controller.abort();
+  // The stream is released, so the next connection is not refused as one too many.
+  await new Promise((r) => setTimeout(r, 50));
+  const { liveClientCount } = await import('../src/admin/live.js');
+  assert.equal(liveClientCount(), 0);
 });
 
 // Keep last: it locks 127.0.0.1 out of the dashboard for the rest of this file.

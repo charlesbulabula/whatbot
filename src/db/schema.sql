@@ -49,7 +49,10 @@ CREATE TABLE IF NOT EXISTS orders (
   subtotal          INTEGER NOT NULL DEFAULT 0,
   delivery_fee      INTEGER NOT NULL DEFAULT 0,
   discount          INTEGER NOT NULL DEFAULT 0,      -- credit spent on this order
+  coupon            TEXT,                            -- code applied, upper-case
+  coupon_discount   INTEGER NOT NULL DEFAULT 0,      -- discount granted by that coupon
   total             INTEGER NOT NULL DEFAULT 0,
+  payment_method    TEXT NOT NULL DEFAULT 'momo',    -- momo | cash (on delivery)
   customer_name     TEXT,
   neighborhood      TEXT,
   address_note      TEXT,
@@ -90,4 +93,34 @@ CREATE TABLE IF NOT EXISTS processed_events (
 CREATE TABLE IF NOT EXISTS settings (
   key               TEXT PRIMARY KEY,
   value             TEXT
+);
+
+CREATE TABLE IF NOT EXISTS zones (
+  id                INTEGER PRIMARY KEY AUTOINCREMENT,
+  name              TEXT NOT NULL UNIQUE,
+  fee               INTEGER NOT NULL DEFAULT 0,      -- delivery fee for this area
+  active            INTEGER NOT NULL DEFAULT 1,
+  sort_order        INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS coupons (
+  id                INTEGER PRIMARY KEY AUTOINCREMENT,
+  code              TEXT NOT NULL UNIQUE,            -- stored upper-case
+  kind              TEXT NOT NULL DEFAULT 'amount',  -- amount | percent | free_delivery
+  value             INTEGER NOT NULL DEFAULT 0,      -- FC, or percent points
+  min_subtotal      INTEGER NOT NULL DEFAULT 0,
+  max_uses          INTEGER NOT NULL DEFAULT 0,      -- 0 = unlimited
+  used_count        INTEGER NOT NULL DEFAULT 0,
+  once_per_customer INTEGER NOT NULL DEFAULT 1,
+  expires_on        TEXT,                            -- YYYY-MM-DD, NULL = never
+  active            INTEGER NOT NULL DEFAULT 1,
+  created_at        TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS coupon_uses (
+  coupon_id         INTEGER NOT NULL REFERENCES coupons(id) ON DELETE CASCADE,
+  customer_id       INTEGER NOT NULL REFERENCES customers(id),
+  order_id          INTEGER NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+  created_at        TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (coupon_id, order_id)
 );

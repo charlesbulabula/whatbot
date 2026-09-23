@@ -163,4 +163,44 @@ export default {
   adminPaidByCredit: (p) => `🎁 Order paid with credit\n${p.ref}\n${p.name}, ${p.zone}\n${p.url}`,
   adminHandoff: (p) => `🙋 ${p.name} (+${p.phone}) asks to talk to someone\n${p.url}`,
   adminBadRating: (p) => `⚠️ Rating ${p.rating}/5 on ${p.ref} (${p.name}, +${p.phone})`,
+
+  /* ------------------------- opening hours ----------------------------- */
+  weekdays: {
+    0: 'Sunday', 1: 'Monday', 2: 'Tuesday', 3: 'Wednesday', 4: 'Thursday', 5: 'Friday', 6: 'Saturday',
+  },
+  shopClosed: 'We are closed right now 🙏',
+  closedUntilToday: (p) => `We reopen today at *${p.time}*.`,
+  closedUntilTomorrow: (p) => `We reopen tomorrow at *${p.time}*.`,
+  closedUntilDay: (p) => `We reopen on ${p.day} at *${p.time}*.`,
+  minOrderNotReached: (p) => `The minimum order is *${p.amount}*. Add one more item 🙂`,
+
+  /* ------------------------ delivery areas ----------------------------- */
+  zoneFee: (p) => `Delivery ${p.amount}`,
+  zoneFeeList: (p) => `Delivery fees:\n${p.lines}`,
+  zoneFeeFree: 'Free delivery',
+
+  /* --------------------------- coupons --------------------------------- */
+  btnCoupon: '🎟️ Promo code',
+  btnSkipCoupon: '← Back',
+  askCoupon: 'Send your promo code:',
+  couponApplied: (p) => `🎟️ Code *${p.code}* applied: −${p.amount}`,
+  couponLine: (p) => `Code ${p.code}: −${p.amount}`,
+  couponRejected: {
+    unknown: (p) => `Code *${p.code}* does not exist. Check the spelling or go back.`,
+    inactive: (p) => `Code *${p.code}* is no longer active.`,
+    expired: (p) => `Code *${p.code}* has expired.`,
+    exhausted: (p) => `Code *${p.code}* has reached its usage limit.`,
+    used: (p) => `You have already used code *${p.code}*.`,
+    min: (p) => `This code applies from ${p.min} of order value.`,
+  },
+
+  /* ------------------------ payment method ----------------------------- */
+  askPayment: 'How would you like to pay?',
+  btnPayMomo: '📱 Mobile money',
+  btnPayCash: '💵 Cash on delivery',
+  cashConfirmed: (p) =>
+    `✅ Order *${p.ref}* placed!\nYou will pay *${p.total}* in cash on delivery.\n` +
+    `Please have the exact amount ready if you can 🙏 We will confirm when the rider leaves.`,
+  adminCashOrder: (p) => `💵 Cash-on-delivery order\n${p.ref} — ${p.total}\n${p.name}, ${p.zone}\n${p.url}`,
+
 };

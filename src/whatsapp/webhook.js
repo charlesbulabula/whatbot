@@ -2,6 +2,7 @@ import express from 'express';
 import { config } from '../config.js';
 import { logger } from '../utils/logger.js';
 import { enqueue } from '../utils/queue.js';
+import { publish } from '../utils/events.js';
 import { markEventProcessed } from '../db/index.js';
 import { handleInbound } from '../bot/engine.js';
 import { enrichInbound } from '../bot/enrich.js';
@@ -80,6 +81,8 @@ export async function processInbound(msg) {
       logger.error('Follow-up task failed:', err.stack || err.message);
     }
   }
+  // Tell every open dashboard that this conversation moved.
+  publish('message', { phone: msg.from });
 }
 
 export const webhookRouter = express.Router();

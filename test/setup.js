@@ -15,3 +15,6 @@ process.env.LOYALTY_EVERY = '3';
 process.env.LOYALTY_REWARD = '2000';
 process.env.WEEKLY_STOCK_CAPACITY = '0';
 process.env.TZ = 'Africa/Kinshasa';
+// Open around the clock, so the suite never depends on the hour it runs at.
+// Tests that exercise the opening hours save their own schedule.
+process.env.SHOP_HOURS = '24/7';

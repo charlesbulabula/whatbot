@@ -167,4 +167,44 @@ export default {
   adminPaidByCredit: (p) => `🎁 Commande payée par crédit\n${p.ref}\n${p.name}, ${p.zone}\n${p.url}`,
   adminHandoff: (p) => `🙋 ${p.name} (+${p.phone}) demande à parler à quelqu’un\n${p.url}`,
   adminBadRating: (p) => `⚠️ Note ${p.rating}/5 sur ${p.ref} (${p.name}, +${p.phone})`,
+
+  /* ------------------------- opening hours ----------------------------- */
+  weekdays: {
+    0: 'dimanche', 1: 'lundi', 2: 'mardi', 3: 'mercredi', 4: 'jeudi', 5: 'vendredi', 6: 'samedi',
+  },
+  shopClosed: 'Nous sommes fermés pour le moment 🙏',
+  closedUntilToday: (p) => `Nous rouvrons aujourd’hui à *${p.time}*.`,
+  closedUntilTomorrow: (p) => `Nous rouvrons demain à *${p.time}*.`,
+  closedUntilDay: (p) => `Nous rouvrons ${p.day} à *${p.time}*.`,
+  minOrderNotReached: (p) => `Le montant minimum de commande est de *${p.amount}*. Ajoutez encore un article 🙂`,
+
+  /* ------------------------ delivery areas ----------------------------- */
+  zoneFee: (p) => `Livraison ${p.amount}`,
+  zoneFeeList: (p) => `Frais de livraison :\n${p.lines}`,
+  zoneFeeFree: 'Livraison offerte',
+
+  /* --------------------------- coupons --------------------------------- */
+  btnCoupon: '🎟️ Code promo',
+  btnSkipCoupon: '← Retour',
+  askCoupon: 'Envoyez votre code promo :',
+  couponApplied: (p) => `🎟️ Code *${p.code}* appliqué : −${p.amount}`,
+  couponLine: (p) => `Code ${p.code} : −${p.amount}`,
+  couponRejected: {
+    unknown: (p) => `Le code *${p.code}* n’existe pas. Vérifiez l’orthographe ou revenez en arrière.`,
+    inactive: (p) => `Le code *${p.code}* n’est plus actif.`,
+    expired: (p) => `Le code *${p.code}* a expiré.`,
+    exhausted: (p) => `Le code *${p.code}* a atteint sa limite d’utilisation.`,
+    used: (p) => `Vous avez déjà utilisé le code *${p.code}*.`,
+    min: (p) => `Ce code s’applique à partir de ${p.min} de commande.`,
+  },
+
+  /* ------------------------ payment method ----------------------------- */
+  askPayment: 'Comment souhaitez-vous payer ?',
+  btnPayMomo: '📱 Mobile money',
+  btnPayCash: '💵 À la livraison',
+  cashConfirmed: (p) =>
+    `✅ Commande *${p.ref}* enregistrée !\nVous paierez *${p.total}* en espèces à la livraison.\n` +
+    `Préparez l’appoint si possible 🙏 Nous vous confirmons le passage du livreur.`,
+  adminCashOrder: (p) => `💵 Commande à payer à la livraison\n${p.ref} — ${p.total}\n${p.name}, ${p.zone}\n${p.url}`,
+
 };

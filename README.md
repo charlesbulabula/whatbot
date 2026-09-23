@@ -35,6 +35,14 @@ ou mot « english »). Le tableau de bord admin suit la même règle (lien « En
 | **Feuille de route du livreur** | Un lien secret par jour (sans mot de passe admin) à envoyer au livreur sur WhatsApp : ses livraisons avec appel, WhatsApp, itinéraire ; il marque « Je pars » et « Livrée », le client est prévenu. Le lien expire après 2 jours. |
 | **Statistiques** | Chiffre d'affaires par jour, panier moyen, clients fidèles, note moyenne, produits et quartiers, sur 7, 30 ou 90 jours. |
 | **Export CSV** | Toutes les commandes d'une période, lisible directement dans Excel. |
+| **Horaires d'ouverture** | Un horaire par jour de la semaine, plus un interrupteur « fermer maintenant ». Hors horaires le bot répond poliment, indique la prochaine ouverture et n'enregistre aucune commande. |
+| **Zones de livraison à frais variables** | Chaque quartier a ses propres frais de livraison, appliqués automatiquement. Une zone peut être suspendue sans être supprimée. |
+| **Paiement à la livraison** | En plus du mobile money : le client choisit au moment de valider, et le livreur voit le montant exact à encaisser sur sa feuille de route (avec le total de la tournée). |
+| **Codes promo** | Montant fixe, pourcentage ou livraison offerte ; panier minimum, date d'expiration, limite d'utilisations, une seule fois par client. Annuler une commande libère le code. |
+| **Commande minimum** | En dessous du montant fixé, le bot renvoie au catalogue avant même de demander l'adresse. |
+| **Réglages sans redéploiement** | Nom de la boutique, horaires, numéros mobile money, numéro d'alerte, frais, capacité et commande minimum se modifient depuis le tableau de bord. |
+| **Tableau de bord en temps réel** | Nouveau message, nouvelle commande, changement de statut, demande d'agent : le tableau de bord se met à jour tout seul, sans rechargement manuel (Server-Sent Events). S'il est en train de taper, rien n'est perdu : une pastille propose d'actualiser. |
+| **Alertes e-mail (SMTP)** | En plus de WhatsApp, chaque nouvelle commande et chaque demande d'agent part par e-mail. Indispensable : hors de la fenêtre de 24 h, WhatsApp refuse les messages libres, l'e-mail passe toujours. Bouton « Envoyer un e-mail de test » dans les réglages. |
 | **Robustesse** | Captures de paiement copiées sur le serveur (les liens Meta expirent), sauvegarde quotidienne de la base (14 jours), migration automatique de la base à chaque mise à jour, blocage après 10 mauvais mots de passe admin, arrêt propre lors des redéploiements. |
 
 **Pas encore fait (phase 2 prévue dans l'architecture) :** vérification automatique du
@@ -43,6 +51,13 @@ paiement via les API Orange Money / Airtel Money (aujourd'hui : capture d'écran
 d'utiliser les boutons, sauf pendant une prise en main humaine).
 
 ## Mise en ligne
+
+> **Réglages `.env` ou tableau de bord ?** Les variables `.env` du bloc *Shop*
+> (`SHOP_NAME`, `DELIVERY_FEE`, `DELIVERY_ZONES`, `SHOP_HOURS`, `MOMO_*`,
+> `ADMIN_NOTIFY_NUMBER`) ne servent qu'à **initialiser** une installation neuve.
+> Ensuite, tout se règle dans *Réglages* et *Zones de livraison* : pas de redéploiement,
+> pas de secret GitHub à changer. Les identifiants Meta et `ADMIN_PASSWORD` restent
+> dans `.env`.
 
 ### 1. DNS : créer `bot.ll-aca.site` (une seule fois)
 
@@ -155,17 +170,35 @@ Coût indicatif (architecture §3.1) : ~0,004-0,005 $ par message utilitaire hor
   - « À préparer ce jour » : total par produit et taille de tas.
   - « Prévision d'achat » : moyenne hebdomadaire des 4 dernières semaines, pour ton achat du samedi.
   - **Produits** : prix, ajout, et « Marquer épuisé » en un clic.
-  - **Clients** : segment, crédit, code parrain, conversation complète.
+  - **Zones de livraison** : frais par quartier, et suspension d'une zone sans la supprimer.
+  - **Codes promo** : création, limites, activation/désactivation.
+  - **Clients** : recherche par nom, téléphone ou quartier, filtre par segment, crédit,
+    code parrain, conversation complète.
+  - **Réglages** : horaires d'ouverture, fermeture immédiate, mobile money,
+    paiement à la livraison, commande minimum, capacité, numéro d'alerte.
+  - Thème clair / sombre (icône en haut à droite) ; par défaut celui de l'appareil.
+  - Mise à jour en temps réel : pas besoin de recharger la page.
 - **Alerte admin** : mets ton numéro perso dans `ADMIN_NOTIFY_NUMBER` pour recevoir chaque
   capture de paiement. Écris « Bonjour » au bot une fois par jour depuis ce numéro pour
   garder la fenêtre de 24 h ouverte, ou crée le modèle `admin_alert`.
 - **Statistiques** et **export CSV** : onglet *Statistiques* du tableau de bord.
+- **Alertes e-mail** : renseigne `SMTP_HOST`, `SMTP_FROM` (et `SMTP_USER` / `SMTP_PASS`) dans le
+  `.env` du serveur, puis l'adresse destinataire dans *Réglages → Alertes*. Le bouton
+  « Envoyer un e-mail de test » vérifie la connexion. C'est le filet de sécurité quand la
+  fenêtre WhatsApp de 24 h est fermée.
 - **Livreur** : bouton « 🛵 Feuille de route du livreur » sur le tableau de bord → « Envoyer au livreur par WhatsApp ».
 - **Coût de la commande en texte libre** : environ 1 centime de dollar par phrase analysée avec
   le modèle par défaut (`ANTHROPIC_MODEL=claude-opus-5`). Un modèle plus léger coûte moins
   cher, au prix d'une compréhension moins fine : à toi de choisir.
-- **Capacité** : `WEEKLY_STOCK_CAPACITY=40` bascule les nouvelles commandes en liste d'attente
-  au-delà de 40 commandes sur 7 jours ; les clients en attente sont prévenus dès qu'une place se libère.
+- **Capacité** : *Réglages → Capacité hebdomadaire*. À `40`, les nouvelles commandes basculent
+  en liste d'attente au-delà de 40 commandes sur 7 jours ; les clients en attente sont prévenus
+  dès qu'une place se libère. (`WEEKLY_STOCK_CAPACITY` ne sert plus qu'à la valeur initiale.)
+- **Fermer la boutique** : *Réglages → Fermer la boutique maintenant*, avec un message
+  affiché aux clients (« Stock en cours de réapprovisionnement »). Le bandeau du tableau de
+  bord et la pastille de la barre latérale rappellent en permanence que la boutique est fermée.
+- **Paiement à la livraison** : à activer dans *Réglages → Paiement*. Une commande en espèces
+  reste « en attente de paiement » jusqu'à ce que tu la confirmes ; le tableau de bord affiche
+  le total d'espèces à encaisser sur la journée, et la feuille de route du livreur le détail.
 
 ## Diagnostic
 

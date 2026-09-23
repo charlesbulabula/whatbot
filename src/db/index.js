@@ -18,6 +18,9 @@ db.exec(fs.readFileSync(path.join(here, 'schema.sql'), 'utf8'));
 const ADDED_COLUMNS = [
   ['orders', 'payment_proof_file', 'TEXT'],
   ['messages', 'media_id', 'TEXT'],
+  ['orders', 'payment_method', "TEXT NOT NULL DEFAULT 'momo'"],
+  ['orders', 'coupon', 'TEXT'],
+  ['orders', 'coupon_discount', 'INTEGER NOT NULL DEFAULT 0'],
 ];
 for (const [table, column, type] of ADDED_COLUMNS) {
   const exists = db.prepare(`SELECT 1 FROM pragma_table_info(?) WHERE name = ?`).get(table, column);
@@ -197,7 +200,10 @@ export function idleConversations(states, olderThanMinutes, { reminded } = {}) {
 
 /* ------------------------------- orders -------------------------------- */
 
-export function createOrder({ customer, items, subtotal, deliveryFee, discount, total, name, neighborhood, addressNote }) {
+export function createOrder({
+  customer, items, subtotal, deliveryFee, discount, total, name, neighborhood, addressNote,
+  paymentMethod = 'momo', coupon = null, couponDiscount = 0,
+}) {
   const tx = db.transaction(() => {
     // Next number after the highest reference already issued today: unique by construction,
     // even if the server clock or timezone changes.
@@ -209,10 +215,12 @@ export function createOrder({ customer, items, subtotal, deliveryFee, discount, 
     const reference = `${prefix}${String((last || 0) + 1).padStart(3, '0')}`;
     const info = db
       .prepare(
-        `INSERT INTO orders (reference, customer_id, subtotal, delivery_fee, discount, total, customer_name, neighborhood, address_note)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO orders (reference, customer_id, subtotal, delivery_fee, discount, coupon, coupon_discount,
+                             total, payment_method, customer_name, neighborhood, address_note)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
-      .run(reference, customer.id, subtotal, deliveryFee, discount, total, name, neighborhood, addressNote);
+      .run(reference, customer.id, subtotal, deliveryFee, discount, coupon?.code || null, couponDiscount,
+           total, paymentMethod, name, neighborhood, addressNote);
     const insertItem = db.prepare(
       `INSERT INTO order_items (order_id, product_id, size, quantity, unit_price, line_total) VALUES (?, ?, ?, ?, ?, ?)`,
     );
@@ -220,6 +228,11 @@ export function createOrder({ customer, items, subtotal, deliveryFee, discount, 
       insertItem.run(info.lastInsertRowid, it.productId, it.size, it.quantity, it.unitPrice, it.unitPrice * it.quantity);
     }
     if (discount > 0) addCredit(customer.id, -discount);
+    if (coupon) {
+      db.prepare('UPDATE coupons SET used_count = used_count + 1 WHERE id = ?').run(coupon.id);
+      db.prepare('INSERT INTO coupon_uses (coupon_id, customer_id, order_id) VALUES (?, ?, ?)')
+        .run(coupon.id, customer.id, info.lastInsertRowid);
+    }
     return info.lastInsertRowid;
   });
   return getOrder(tx());
@@ -263,6 +276,11 @@ export function setOrderStatus(id, status, { eta } = {}) {
 
     if (status === 'cancelled' && before.status !== 'cancelled') {
       if (before.discount > 0) addCredit(before.customer_id, before.discount);
+      const use = db.prepare('SELECT coupon_id FROM coupon_uses WHERE order_id = ?').get(id);
+      if (use) {
+        db.prepare('UPDATE coupons SET used_count = MAX(0, used_count - 1) WHERE id = ?').run(use.coupon_id);
+        db.prepare('DELETE FROM coupon_uses WHERE order_id = ?').run(id);
+      }
       if (before.paid_at) {
         db.prepare(
           'UPDATE customers SET orders_count = MAX(0, orders_count - 1), total_spent = MAX(0, total_spent - ?) WHERE id = ?',
@@ -540,4 +558,166 @@ export function ordersBetween(fromDay, toDay) {
     .prepare(`SELECT id FROM orders WHERE date(created_at, 'localtime') BETWEEN ? AND ? ORDER BY created_at`)
     .all(fromDay, toDay)
     .map((r) => getOrder(r.id));
+}
+
+/* ------------------------- delivery zones ------------------------------ */
+// Each served area carries its own delivery fee. The DELIVERY_ZONES / DELIVERY_FEE
+// env values only seed the table on a fresh install; the dashboard owns them after that.
+
+export function listZones({ onlyActive = false } = {}) {
+  const where = onlyActive ? 'WHERE active = 1' : '';
+  return db.prepare(`SELECT * FROM zones ${where} ORDER BY sort_order, name`).all();
+}
+
+export function getZone(id) {
+  return db.prepare('SELECT * FROM zones WHERE id = ?').get(id);
+}
+
+/** Case- and accent-insensitive lookup, so "ngaliema" finds "Ngaliema". */
+export function findZoneByName(name) {
+  const key = foldZone(name);
+  return listZones().find((z) => foldZone(z.name) === key) || null;
+}
+
+const foldZone = (s) =>
+  String(s || '')
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '');
+
+export function createZone({ name, fee = 0, active = 1, sort_order = 0 }) {
+  const info = db
+    .prepare('INSERT INTO zones (name, fee, active, sort_order) VALUES (?, ?, ?, ?)')
+    .run(name, fee, active ? 1 : 0, sort_order);
+  return getZone(info.lastInsertRowid);
+}
+
+const ZONE_FIELDS = ['name', 'fee', 'active', 'sort_order'];
+
+export function updateZone(id, fields) {
+  const keys = ZONE_FIELDS.filter((k) => fields[k] !== undefined);
+  if (!keys.length) return getZone(id);
+  db.prepare(`UPDATE zones SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`).run(...keys.map((k) => fields[k]), id);
+  return getZone(id);
+}
+
+export function deleteZone(id) {
+  db.prepare('DELETE FROM zones WHERE id = ?').run(id);
+}
+
+/** Seeds the areas listed in DELIVERY_ZONES on first run only. Returns how many were created. */
+export function seedZonesIfEmpty(names, fee) {
+  if (db.prepare('SELECT COUNT(*) AS n FROM zones').get().n > 0) return 0;
+  names.forEach((name, i) => createZone({ name, fee, sort_order: i + 1 }));
+  return names.length;
+}
+
+/* ----------------------------- coupons --------------------------------- */
+
+export function listCoupons() {
+  return db.prepare('SELECT * FROM coupons ORDER BY active DESC, created_at DESC').all();
+}
+
+export function getCoupon(id) {
+  return db.prepare('SELECT * FROM coupons WHERE id = ?').get(id);
+}
+
+export function getCouponByCode(code) {
+  return db.prepare('SELECT * FROM coupons WHERE code = ?').get(String(code || '').toUpperCase()) || null;
+}
+
+export function couponUsedByCustomer(couponId, customerId) {
+  return Boolean(
+    db
+      .prepare(
+        `SELECT 1 FROM coupon_uses cu JOIN orders o ON o.id = cu.order_id
+          WHERE cu.coupon_id = ? AND cu.customer_id = ? AND o.status != 'cancelled'`,
+      )
+      .get(couponId, customerId),
+  );
+}
+
+const COUPON_FIELDS = ['code', 'kind', 'value', 'min_subtotal', 'max_uses', 'once_per_customer', 'expires_on', 'active'];
+
+export function createCoupon(fields) {
+  const keys = COUPON_FIELDS.filter((k) => fields[k] !== undefined);
+  const info = db
+    .prepare(`INSERT INTO coupons (${keys.join(', ')}) VALUES (${keys.map(() => '?').join(', ')})`)
+    .run(...keys.map((k) => fields[k]));
+  return getCoupon(info.lastInsertRowid);
+}
+
+export function updateCoupon(id, fields) {
+  const keys = COUPON_FIELDS.filter((k) => fields[k] !== undefined);
+  if (!keys.length) return getCoupon(id);
+  db.prepare(`UPDATE coupons SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`).run(...keys.map((k) => fields[k]), id);
+  return getCoupon(id);
+}
+
+export function deleteCoupon(id) {
+  db.prepare('DELETE FROM coupons WHERE id = ?').run(id);
+}
+
+/** Coupons used over a period, for the stats page. */
+export function couponStats(days) {
+  return db
+    .prepare(
+      `SELECT coupon AS code, COUNT(*) AS uses, SUM(coupon_discount) AS granted
+         FROM orders
+        WHERE coupon IS NOT NULL AND status IN (${PAID_SQL})
+          AND ${LOCAL_DAY} >= date('now', 'localtime', ?)
+        GROUP BY coupon ORDER BY uses DESC`,
+    )
+    .all(`-${days - 1} days`);
+}
+
+/** Split of paid orders by payment method over a period. */
+export function paymentMethodStats(days) {
+  return db
+    .prepare(
+      `SELECT payment_method AS method, COUNT(*) AS orders, SUM(total) AS revenue
+         FROM orders
+        WHERE status IN (${PAID_SQL}) AND ${LOCAL_DAY} >= date('now', 'localtime', ?)
+        GROUP BY payment_method ORDER BY orders DESC`,
+    )
+    .all(`-${days - 1} days`);
+}
+
+/** Cash still to collect: delivered orders paid in cash are settled, the rest are not. */
+export function cashToCollect(day) {
+  return db
+    .prepare(
+      `SELECT COALESCE(SUM(total), 0) AS amount, COUNT(*) AS orders
+         FROM orders
+        WHERE payment_method = 'cash' AND status IN ('paid','preparing','on_the_way') AND ${LOCAL_DAY} = ?`,
+    )
+    .get(day);
+}
+
+/** Payments waiting for a manual check today — shown as a sidebar badge. */
+export function pendingProofCount() {
+  return db
+    .prepare(
+      `SELECT COUNT(*) AS n FROM orders
+        WHERE status = 'awaiting_payment' AND (payment_proof IS NOT NULL OR payment_method = 'cash')
+          AND ${LOCAL_DAY} = ${TODAY}`,
+    )
+    .get().n;
+}
+
+/** Customer list with an optional name/phone search and segment filter. */
+export function searchCustomers({ query = '', segment = '' } = {}) {
+  const clauses = [];
+  const params = [];
+  if (query) {
+    clauses.push('(name LIKE ? OR phone LIKE ? OR neighborhood LIKE ? OR referral_code LIKE ?)');
+    params.push(`%${query}%`, `%${query}%`, `%${query}%`, `%${query.toUpperCase()}%`);
+  }
+  if (segment) {
+    clauses.push('segment = ?');
+    params.push(segment);
+  }
+  const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
+  return db.prepare(`SELECT * FROM customers ${where} ORDER BY orders_count DESC, created_at DESC LIMIT 500`).all(...params);
 }

@@ -10,9 +10,11 @@ const KEYS = [
   ['WA_TOKEN', 'Meta'],
   ['WA_APP_SECRET', 'Meta'],
   ['WA_BUSINESS_NUMBER', 'referral links'],
-  ['MOMO_ORANGE', 'payment'],
-  ['MOMO_AIRTEL', 'payment'],
-  ['ADMIN_NOTIFY_NUMBER', 'alerts'],
+  ['MOMO_ORANGE', 'payment — or set it in the dashboard'],
+  ['MOMO_AIRTEL', 'payment — or set it in the dashboard'],
+  ['ADMIN_NOTIFY_NUMBER', 'alerts — or set it in the dashboard'],
+  ['SMTP_HOST', 'optional: email alerts'],
+  ['SMTP_FROM', 'optional: email alerts'],
   ['ANTHROPIC_API_KEY', 'optional: free-text orders'],
 ];
 

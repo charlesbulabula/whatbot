@@ -8,7 +8,11 @@ import { changeOrderStatus, ORDER_STATUSES, storeProof } from '../bot/orders.js'
 import { downloadMedia, send } from '../whatsapp/client.js';
 import { inServiceWindow } from '../bot/notify.js';
 import { text } from '../bot/messages.js';
+import * as settings from '../shop/settings.js';
+import { COUPON_KINDS, normalizeCode } from '../shop/coupons.js';
 import { adminDictionaries } from './i18n.js';
+import { mountLiveUpdates } from './live.js';
+import { smtpConfigured, sendTestEmail } from '../mail.js';
 import * as views from './views.js';
 import { routeUrl, ordersForRoute, riderCards } from './route.js';
 
@@ -92,21 +96,41 @@ adminRouter.use((req, res, next) => {
   const locale = normalizeLocale(readCookie(req, 'admin_lang') || DEFAULT_LOCALE);
   res.locals.locale = locale;
   res.locals.L = adminDictionaries[locale] || adminDictionaries.fr;
+  // No cookie means "follow the device", which the stylesheet handles on its own.
+  const theme = readCookie(req, 'admin_theme');
+  res.locals.theme = theme === 'dark' || theme === 'light' ? theme : '';
   next();
+});
+
+/** Where a header toggle should send the admin back to. */
+function backToPage(req) {
+  try {
+    const referer = new URL(req.get('referer'));
+    if (referer.host === req.get('host')) return safeBack(referer.pathname + referer.search, '/admin');
+  } catch {
+    /* no or malformed referer */
+  }
+  return '/admin';
+}
+
+adminRouter.get('/theme', (req, res) => {
+  // With no cookie yet the page follows the device, and only the browser knows
+  // which way that is: the header link passes it as ?to=, see views.layout().
+  const asked = req.query.to;
+  const next = asked === 'light' || asked === 'dark' ? asked : res.locals.theme === 'dark' ? 'light' : 'dark';
+  res.cookie('admin_theme', next, { httpOnly: true, sameSite: 'lax', secure: req.secure, maxAge: 365 * 864e5, path: '/admin' });
+  res.redirect(backToPage(req));
 });
 
 adminRouter.get('/lang', (req, res) => {
   const next = res.locals.locale === 'fr' ? 'en' : 'fr';
   res.cookie('admin_lang', next, { httpOnly: true, sameSite: 'lax', secure: req.secure, maxAge: 365 * 864e5, path: '/admin' });
-  let back = '/admin';
-  try {
-    const referer = new URL(req.get('referer'));
-    if (referer.host === req.get('host')) back = referer.pathname + referer.search;
-  } catch {
-    /* no or malformed referer */
-  }
-  res.redirect(safeBack(back, '/admin'));
+  res.redirect(backToPage(req));
 });
+
+/* ---------------------------- live updates ----------------------------- */
+
+mountLiveUpdates(adminRouter);
 
 /* ------------------------------- helpers ------------------------------- */
 
@@ -132,7 +156,8 @@ adminRouter.get('/', (req, res) => {
     orders: orders.filter((o) => o.status !== 'cancelled').length,
     revenueDay: db.revenueSince('+0 days'),
     revenueWeek: db.revenueSince('-6 days'),
-    toCheck: orders.filter((o) => o.status === 'awaiting_payment' && o.payment_proof).length,
+    toCheck: orders.filter((o) => o.status === 'awaiting_payment' && (o.payment_proof || o.payment_method === 'cash')).length,
+    cash: db.cashToCollect(day),
   };
   res.send(
     views.dashboardPage(L, locale, {
@@ -146,6 +171,7 @@ adminRouter.get('/', (req, res) => {
       forecast: db.demandForecast(),
       handoffs: db.handoffConversations(),
       flash: req.query.flash,
+      theme: res.locals.theme,
     }),
   );
 });
@@ -154,7 +180,9 @@ adminRouter.get('/orders/:id', (req, res) => {
   const { L, locale } = res.locals;
   const order = db.getOrder(Number(req.params.id));
   if (!order) return res.status(404).send('Not found');
-  res.send(views.orderPage(L, locale, { order, messages: db.messagesFor(order.customer.phone), flash: req.query.flash }));
+  res.send(views.orderPage(L, locale, {
+    order, messages: db.messagesFor(order.customer.phone), flash: req.query.flash, theme: res.locals.theme,
+  }));
 });
 
 adminRouter.post('/orders/:id/status', async (req, res) => {
@@ -201,7 +229,9 @@ const productFields = (b) => ({
 
 adminRouter.get('/products', (req, res) => {
   const { L, locale } = res.locals;
-  res.send(views.productsPage(L, locale, { products: db.listProducts({ onlyInStock: false }), flash: req.query.flash }));
+  res.send(views.productsPage(L, locale, {
+    products: db.listProducts({ onlyInStock: false }), flash: req.query.flash, theme: res.locals.theme,
+  }));
 });
 
 adminRouter.post('/products', (req, res) => {
@@ -228,7 +258,11 @@ adminRouter.post('/products/:id/stock', (req, res) => {
 
 adminRouter.get('/customers', (req, res) => {
   const { L, locale } = res.locals;
-  res.send(views.customersPage(L, locale, { customers: db.listCustomers() }));
+  const query = String(req.query.q || '').trim().slice(0, 60);
+  const segment = ['new', 'regular', 'vip'].includes(req.query.segment) ? req.query.segment : '';
+  res.send(views.customersPage(L, locale, {
+    customers: db.searchCustomers({ query, segment }), query, segment, theme: res.locals.theme,
+  }));
 });
 
 adminRouter.get('/customers/:id', (req, res) => {
@@ -243,6 +277,7 @@ adminRouter.get('/customers/:id', (req, res) => {
       state: db.getConversation(customer.phone).state,
       canReply: inServiceWindow(customer),
       flash: req.query.flash,
+      theme: res.locals.theme,
     }),
   );
 });
@@ -296,6 +331,126 @@ adminRouter.get('/messages/:id/media', async (req, res) => {
   }
 });
 
+adminRouter.post('/settings/test-email', async (req, res) => {
+  const { L } = res.locals;
+  const result = await sendTestEmail();
+  const flash = result.ok ? L.testEmailSent(result.to) : `${L.testEmailFailed} ${result.error}`;
+  res.redirect(`${withFlash('/admin/settings', flash)}${result.ok ? '' : '&tone=danger'}`);
+});
+
+/* --------------------------- delivery zones ---------------------------- */
+
+const zoneFields = (b) => ({
+  name: String(b.name || '').trim().slice(0, 40),
+  fee: toInt(b.fee),
+  active: b.active === '1' ? 1 : 0,
+  sort_order: Math.round(Number(b.sort_order) || 0),
+});
+
+adminRouter.get('/zones', (req, res) => {
+  const { L, locale } = res.locals;
+  res.send(views.zonesPage(L, locale, { zones: db.listZones(), flash: req.query.flash, theme: res.locals.theme }));
+});
+
+adminRouter.post('/zones', (req, res) => {
+  const fields = zoneFields(req.body);
+  if (!fields.name) return res.status(400).send('Name required');
+  if (db.findZoneByName(fields.name)) return res.redirect(withFlash('/admin/zones', res.locals.L.zoneExists));
+  const sortOrder = db.listZones().reduce((max, z) => Math.max(max, z.sort_order), 0) + 1;
+  db.createZone({ ...fields, active: 1, sort_order: sortOrder });
+  res.redirect(withFlash('/admin/zones', res.locals.L.saved));
+});
+
+adminRouter.post('/zones/:id', (req, res) => {
+  const fields = zoneFields(req.body);
+  if (!fields.name) return res.status(400).send('Name required');
+  const clash = db.findZoneByName(fields.name);
+  if (clash && clash.id !== Number(req.params.id)) return res.redirect(withFlash('/admin/zones', res.locals.L.zoneExists));
+  db.updateZone(Number(req.params.id), fields);
+  res.redirect(withFlash('/admin/zones', res.locals.L.saved));
+});
+
+adminRouter.post('/zones/:id/delete', (req, res) => {
+  db.deleteZone(Number(req.params.id));
+  res.redirect(withFlash('/admin/zones', res.locals.L.saved));
+});
+
+/* ------------------------------- coupons ------------------------------- */
+
+const couponFields = (b) => ({
+  code: normalizeCode(b.code),
+  kind: COUPON_KINDS.includes(b.kind) ? b.kind : 'amount',
+  value: toInt(b.value),
+  min_subtotal: toInt(b.min_subtotal),
+  max_uses: toInt(b.max_uses),
+  once_per_customer: b.once_per_customer === '1' ? 1 : 0,
+  expires_on: isDay(b.expires_on) ? b.expires_on : null,
+  active: b.active === '1' ? 1 : 0,
+});
+
+adminRouter.get('/coupons', (req, res) => {
+  const { L, locale } = res.locals;
+  res.send(views.couponsPage(L, locale, { coupons: db.listCoupons(), flash: req.query.flash, theme: res.locals.theme }));
+});
+
+adminRouter.post('/coupons', (req, res) => {
+  const fields = couponFields(req.body);
+  if (!fields.code) return res.status(400).send('Code required');
+  if (db.getCouponByCode(fields.code)) return res.redirect(withFlash('/admin/coupons', res.locals.L.couponExists));
+  db.createCoupon({ ...fields, active: 1 });
+  res.redirect(withFlash('/admin/coupons', res.locals.L.saved));
+});
+
+adminRouter.post('/coupons/:id', (req, res) => {
+  const { code, ...fields } = couponFields(req.body); // the code itself is never renamed
+  db.updateCoupon(Number(req.params.id), fields);
+  res.redirect(withFlash('/admin/coupons', res.locals.L.saved));
+});
+
+adminRouter.post('/coupons/:id/delete', (req, res) => {
+  db.deleteCoupon(Number(req.params.id));
+  res.redirect(withFlash('/admin/coupons', res.locals.L.saved));
+});
+
+/* ------------------------------- settings ------------------------------ */
+
+adminRouter.get('/settings', (req, res) => {
+  const { L, locale } = res.locals;
+  res.send(views.settingsPage(L, locale, {
+    shop: settings.get(),
+    smtpReady: smtpConfigured(),
+    flash: req.query.flash,
+    flashTone: req.query.tone === 'danger' ? 'danger' : '',
+    theme: res.locals.theme,
+  }));
+});
+
+adminRouter.post('/settings', (req, res) => {
+  const b = req.body;
+  const hours = {};
+  for (const d of settings.WEEKDAYS) {
+    hours[d] = b[`open_${d}`] === '1' ? { open: String(b[`from_${d}`] || ''), close: String(b[`to_${d}`] || '') } : null;
+  }
+  settings.save({
+    name: b.name,
+    minOrder: toInt(b.minOrder),
+    defaultDeliveryFee: toInt(b.defaultDeliveryFee),
+    weeklyCapacity: toInt(b.weeklyCapacity),
+    closed: b.closed === '1',
+    closedNote: b.closedNote,
+    momoEnabled: b.momoEnabled === '1',
+    momoOrange: b.momoOrange,
+    momoAirtel: b.momoAirtel,
+    momoHolder: b.momoHolder,
+    cashEnabled: b.cashEnabled === '1',
+    adminNotifyNumber: b.adminNotifyNumber,
+    alertEmail: b.alertEmail,
+    emailAlerts: b.emailAlerts === '1',
+    hours,
+  });
+  res.redirect(withFlash('/admin/settings', res.locals.L.saved));
+});
+
 /* ---------------------------- rider route sheet ------------------------ */
 
 adminRouter.get('/route', (req, res) => {
@@ -305,11 +460,14 @@ adminRouter.get('/route', (req, res) => {
   const { pending } = ordersForRoute(day);
   const shareText = `${L.route.shareText} ${day} (${pending.length}) : ${url}`;
   const body = `<p><a href="/admin?day=${day}">${views.esc(L.back)}</a></p>
-<h1>🛵 ${views.esc(L.route.title)} — ${views.esc(day)}</h1>
-<div class="card"><p>${views.esc(L.route.share)}</p><p><code style="word-break:break-all">${views.esc(url)}</code></p>
-<div class="actions"><a class="btn" style="background:var(--accent);color:var(--accent-ink)" href="https://wa.me/?text=${encodeURIComponent(shareText)}" target="_blank" rel="noopener noreferrer">${views.esc(L.route.sendWhatsApp)}</a></div></div>
-<h2>${views.esc(L.route.toDeliver)} (${pending.length})</h2>${pending.length ? `<div class="grid">${riderCards(L, pending)}</div>` : `<p class="muted">${views.esc(L.route.empty)}</p>`}`;
-  res.send(views.layout(L, { title: L.route.title, active: 'orders', body }));
+<div class="card"><div class="card__body">
+<p>${views.esc(L.route.share)}</p>
+<p><code style="word-break:break-all">${views.esc(url)}</code></p>
+<div class="actions"><a class="btn btn--primary" href="https://wa.me/?text=${encodeURIComponent(shareText)}"
+target="_blank" rel="noopener noreferrer">${views.esc(L.route.sendWhatsApp)}</a></div></div></div>
+<section class="section"><div class="section__title"><h2>${views.esc(L.route.toDeliver)} (${pending.length})</h2></div>
+${pending.length ? `<div class="grid">${riderCards(L, pending)}</div>` : `<div class="card"><div class="card__body"><p class="muted">${views.esc(L.route.empty)}</p></div></div>`}</section>`;
+  res.send(views.layout(L, { title: `${L.route.title} — ${day}`, active: 'route', body, theme: res.locals.theme }));
 });
 
 /* --------------------------------- stats ------------------------------- */
@@ -325,6 +483,9 @@ adminRouter.get('/stats', (req, res) => {
       products: db.topProducts(days),
       zones: db.zoneStats(days),
       segments: db.segmentCounts(),
+      payments: db.paymentMethodStats(days),
+      coupons: db.couponStats(days),
+      theme: res.locals.theme,
     }),
   );
 });

@@ -11,7 +11,10 @@ import * as db from '../db/index.js';
 import { t, money, productName, normalizeLocale, LOCALES, DEFAULT_LOCALE } from '../i18n/index.js';
 import * as M from './messages.js';
 import * as cart from './cart.js';
+import * as settings from '../shop/settings.js';
+import * as coupons from '../shop/coupons.js';
 import { rewardsAfterPayment, notifyAdmin, notifyAdminProof, storeProof } from './orders.js';
+import { publish } from '../utils/events.js';
 
 export const STATES = Object.freeze({
   WELCOME: 'WELCOME',
@@ -27,7 +30,9 @@ export const STATES = Object.freeze({
   ASK_NAME: 'ASK_NAME',
   ASK_ZONE: 'ASK_ZONE',
   ASK_ADDRESS: 'ASK_ADDRESS',
+  ASK_COUPON: 'ASK_COUPON',
   RECAP: 'RECAP',
+  PICK_PAYMENT: 'PICK_PAYMENT',
   AWAIT_PROOF: 'AWAIT_PROOF',
   RATING: 'RATING',
   NLU_CONFIRM: 'NLU_CONFIRM',
@@ -48,7 +53,9 @@ export const REMINDABLE_STATES = [
   STATES.ASK_NAME,
   STATES.ASK_ZONE,
   STATES.ASK_ADDRESS,
+  STATES.ASK_COUPON,
   STATES.RECAP,
+  STATES.PICK_PAYMENT,
   STATES.AWAIT_PROOF,
 ];
 
@@ -237,7 +244,41 @@ function setLocale(s, locale) {
 
 const otherLocale = (s) => LOCALES.find((l) => l !== s.locale);
 
-const isServedZone = (zone) => config.shop.zones.some((z) => normalize(z) === normalize(zone));
+/** Served areas, from the `zones` table; DELIVERY_ZONES only seeds it on a fresh install. */
+function servedZones() {
+  const zones = db.listZones({ onlyActive: true });
+  return zones.length ? zones : config.shop.zones.map((name) => ({ name, fee: config.shop.deliveryFee }));
+}
+
+const zoneNames = () => servedZones().map((z) => z.name);
+
+const isServedZone = (zone) => servedZones().some((z) => normalize(z.name) === normalize(zone));
+
+/** Delivery fee of an area, falling back to the shop-wide default. */
+function deliveryFeeFor(zoneName) {
+  const zone = servedZones().find((z) => normalize(z.name) === normalize(zoneName));
+  return zone ? zone.fee : settings.get().defaultDeliveryFee;
+}
+
+/**
+ * Prices a basket for the current delivery area, applying any coupon the
+ * customer entered. An coupon that stopped being valid (basket changed, code
+ * expired) is dropped silently rather than blocking the order.
+ */
+function priceFor(s, priced, availableCredit) {
+  const deliveryFee = deliveryFeeFor(s.ctx.delivery?.zone);
+  let applied = null;
+  if (s.ctx.coupon) {
+    const result = coupons.evaluate(s.ctx.coupon, { customer: s.customer, subtotal: priced.subtotal, deliveryFee });
+    if (result.ok) applied = result;
+    else delete s.ctx.coupon;
+  }
+  const totals = cart.computeTotals(priced.subtotal, availableCredit, {
+    deliveryFee,
+    couponDiscount: applied?.discount || 0,
+  });
+  return { totals, coupon: applied?.coupon || null };
+}
 
 function cartText(s) {
   const { lines, subtotal } = cart.priceCart(s.ctx.cart || []);
@@ -275,7 +316,7 @@ function applyDetectedLocation(s, input, name) {
 
 /** Explains why a shared location could not be used as the delivery zone. */
 function locationProblem(s, input) {
-  if (input.geo?.place) return tr(s, 'zoneNotServed', { zone: input.geo.place, zones: config.shop.zones.join(', ') });
+  if (input.geo?.place) return tr(s, 'zoneNotServed', { zone: input.geo.place, zones: zoneNames().join(', ') });
   return tr(s, 'zoneNotDetected');
 }
 
@@ -294,7 +335,7 @@ function handleKeyword(s, input) {
     return true;
   }
   if (KEYWORDS.help.has(k)) {
-    say(s, tr(s, 'help', { zones: config.shop.zones.join(', ') }));
+    say(s, tr(s, 'help', { zones: zoneNames().join(', ') }));
     if (IDLE.has(s.state)) greetAndMenu(s);
     else reprompt(s);
     return true;
@@ -324,6 +365,7 @@ function handleKeyword(s, input) {
 
 /** Pauses the bot for this customer and alerts the shop; they answer from the dashboard. */
 function startHandoff(s) {
+  publish('handoff', { phone: s.phone });
   s.state = STATES.HUMAN;
   s.ctx = { profileName: s.ctx.profileName };
   say(s, tr(s, 'handoffStarted'));
@@ -355,7 +397,7 @@ function greetAndMenu(s, intro, extra) {
   s.ctx = { profileName: s.ctx.profileName };
   const c = s.customer;
   const greeting = s.isNew
-    ? tr(s, 'welcomeNew', { shop: config.shop.name })
+    ? tr(s, 'welcomeNew', { shop: settings.get().name })
     : tr(s, 'welcomeBack', { name: c.name });
   const credit = c.credit > 0 ? tr(s, 'creditBalance', { amount: fmt(s, c.credit) }) : null;
   go(s, STATES.MENU, join(intro, greeting, extra, credit));
@@ -376,9 +418,29 @@ function applyReferral(s, raw) {
   return tr(s, 'referralApplied', { amount: fmt(s, reward) });
 }
 
+/** "We're closed" reply, with the next opening when there is one. */
+function closedMessage(s) {
+  const st = settings.get();
+  const next = settings.nextOpening(new Date(), st);
+  const when = !next
+    ? null
+    : next.today
+      ? tr(s, 'closedUntilToday', { time: next.time })
+      : next.tomorrow
+        ? tr(s, 'closedUntilTomorrow', { time: next.time })
+        : tr(s, 'closedUntilDay', { day: tr(s, `weekdays.${next.day}`), time: next.time });
+  return join(tr(s, 'shopClosed'), st.closedNote || null, when);
+}
+
 function startOrder(s, { reorder = false, skipChecks = false } = {}) {
   if (!skipChecks) {
-    const cap = config.automation.weeklyStockCapacity;
+    const st = settings.get();
+    if (!settings.isOpen(new Date(), st)) {
+      s.state = STATES.DONE;
+      s.ctx = { profileName: s.ctx.profileName };
+      return say(s, closedMessage(s));
+    }
+    const cap = st.weeklyCapacity;
     if (cap > 0 && db.weeklyOrderCount() >= cap) return go(s, STATES.WAITLIST_OFFER);
     const open = db.openOrdersToday(s.customer.id)[0];
     if (open) {
@@ -410,6 +472,12 @@ function startUnderstoodOrder(s, nlu) {
 }
 
 function goCheckout(s, intro) {
+  // Check the minimum before asking for a name and an address, not after.
+  const minOrder = settings.get().minOrder;
+  const { subtotal } = cart.priceCart(s.ctx.cart || []);
+  if (minOrder > 0 && subtotal > 0 && subtotal < minOrder) {
+    return go(s, STATES.PICK_PRODUCT, join(intro, tr(s, 'minOrderNotReached', { amount: fmt(s, minOrder) })));
+  }
   if (s.ctx.delivery && isServedZone(s.ctx.delivery.zone)) return go(s, STATES.RECAP, intro);
   const c = s.customer;
   if (c.name && c.neighborhood && isServedZone(c.neighborhood)) return go(s, STATES.CONFIRM_ADDRESS, intro);
@@ -428,17 +496,22 @@ function confirmOrder(s) {
   }
 
   const customer = db.getCustomerById(s.customer.id);
-  const totals = cart.computeTotals(priced.subtotal, customer.credit);
+  const { totals, coupon } = priceFor(s, priced, customer.credit);
   const d = s.ctx.delivery;
+  const paymentMethod = s.ctx.payment === 'cash' ? 'cash' : 'momo';
   const order = db.createOrder({
     customer,
     items: priced.lines.map((l) => ({ productId: l.productId, size: l.size, quantity: l.qty, unitPrice: l.unitPrice })),
     ...totals,
+    paymentMethod,
+    coupon,
+    couponDiscount: totals.couponDiscount,
     name: d.name,
     neighborhood: d.zone,
     addressNote: d.note,
   });
   s.customer = db.getCustomerById(customer.id);
+  publish('order', { reference: order.reference });
 
   if (order.total === 0) {
     const { order: paid } = db.setOrderStatus(order.id, 'paid');
@@ -448,8 +521,29 @@ function confirmOrder(s) {
     s.tasks.push(() => rewardsAfterPayment(paid), () => notifyAdminProof(paid, { paidByCredit: true }));
     return;
   }
+  // Cash on delivery: nothing to prove, the rider collects. The order waits for
+  // the shop to confirm it, exactly like an unpaid mobile-money order would.
+  if (paymentMethod === 'cash') {
+    s.state = STATES.DONE;
+    s.ctx = {};
+    say(s, tr(s, 'cashConfirmed', { ref: order.reference, total: fmt(s, order.total) }));
+    s.tasks.push(() => notifyAdminProof(order, { cash: true }));
+    return;
+  }
   s.ctx = { orderId: order.id };
   go(s, STATES.AWAIT_PROOF);
+}
+
+/** Asks how the customer wants to pay, or skips the question when only one way is offered. */
+function goPayment(s) {
+  const st = settings.get();
+  const methods = [st.momoEnabled ? 'momo' : null, st.cashEnabled ? 'cash' : null].filter(Boolean);
+  if (methods.length < 2) {
+    s.ctx.payment = methods[0] || 'momo';
+    return confirmOrder(s);
+  }
+  if (s.ctx.payment) return confirmOrder(s);
+  return go(s, STATES.PICK_PAYMENT);
 }
 
 const isProofMedia = (input) => Boolean(input.mediaId) && ['image', 'document'].includes(input.type);
@@ -774,9 +868,21 @@ const HANDLERS = {
 
   [STATES.ASK_ZONE]: {
     enter(s, intro) {
-      const options = config.shop.zones.map((zone, i) => ({ id: `zone:${i}`, title: zone }));
+      const zones = servedZones();
+      const options = zones.map((z, i) => ({
+        id: `zone:${i}`,
+        title: z.name,
+        description: z.fee ? tr(s, 'zoneFee', { amount: fmt(s, z.fee) }) : tr(s, 'zoneFeeFree'),
+      }));
       options.push({ id: 'zone:other', title: tr(s, 'zoneOther') });
-      offer(s, join(intro, tr(s, 'askZone')), options, { buttonLabel: tr(s, 'zoneButton') });
+      // Reply buttons carry no description, so spell the fees out when they differ.
+      const varyingFees = new Set(zones.map((z) => z.fee)).size > 1;
+      const feeLines = varyingFees
+        ? tr(s, 'zoneFeeList', {
+          lines: zones.map((z) => `• ${z.name} — ${z.fee ? fmt(s, z.fee) : tr(s, 'zoneFeeFree')}`).join('\n'),
+        })
+        : null;
+      offer(s, join(intro, tr(s, 'askZone'), feeLines), options, { buttonLabel: tr(s, 'zoneButton') });
     },
     handle(s, input) {
       if (input.location) {
@@ -785,11 +891,11 @@ const HANDLERS = {
       }
       const id = pick(s, input);
       if (id?.startsWith('zone:') && id !== 'zone:other') {
-        s.ctx.draft = { ...(s.ctx.draft || { name: s.customer.name }), zone: config.shop.zones[Number(id.slice(5))] };
+        s.ctx.draft = { ...(s.ctx.draft || { name: s.customer.name }), zone: servedZones()[Number(id.slice(5))]?.name };
         return go(s, STATES.ASK_ADDRESS);
       }
       const typed = id === 'zone:other' || input.type !== 'text' ? null : input.raw;
-      reprompt(s, tr(s, 'zoneNotServed', { zone: typed, zones: config.shop.zones.join(', ') }));
+      reprompt(s, tr(s, 'zoneNotServed', { zone: typed, zones: zoneNames().join(', ') }));
     },
   },
 
@@ -836,7 +942,11 @@ const HANDLERS = {
       // Credit from an order being merged is refunded on confirmation, so count it now.
       const merged = s.ctx.replacesOrderId ? db.getOrder(s.ctx.replacesOrderId) : null;
       const credit = s.customer.credit + (merged?.status === 'awaiting_payment' ? merged.discount : 0);
-      const totals = cart.computeTotals(priced.subtotal, credit);
+      const minOrder = settings.get().minOrder;
+      if (minOrder > 0 && priced.subtotal < minOrder) {
+        return go(s, STATES.PICK_PRODUCT, join(intro, soldOut, tr(s, 'minOrderNotReached', { amount: fmt(s, minOrder) })));
+      }
+      const { totals, coupon } = priceFor(s, priced, credit);
       const d = s.ctx.delivery;
       const lines = [
         tr(s, 'recapTitle'),
@@ -844,23 +954,67 @@ const HANDLERS = {
         '',
         tr(s, 'subtotalLine', { amount: fmt(s, totals.subtotal) }),
         totals.deliveryFee ? tr(s, 'deliveryFeeLine', { amount: fmt(s, totals.deliveryFee) }) : null,
+        coupon ? tr(s, 'couponLine', { code: coupon.code, amount: fmt(s, totals.couponDiscount) }) : null,
         totals.discount ? tr(s, 'discountLine', { amount: fmt(s, totals.discount) }) : null,
         tr(s, 'totalLine', { amount: fmt(s, totals.total) }),
         '',
         tr(s, 'deliveryTo', { name: d.name, zone: d.zone, note: d.note }),
       ].filter((l) => l !== null);
-      offer(s, join(intro, soldOut, lines.join('\n'), tr(s, 'recapPrompt')), [
+      const options = [
         { id: 'recap:confirm', title: tr(s, 'btnConfirm') },
         { id: 'recap:edit', title: tr(s, 'btnModify') },
-        { id: 'recap:cancel', title: tr(s, 'btnCancel') },
-      ]);
+      ];
+      if (!coupon && db.listCoupons().some((c) => c.active)) options.push({ id: 'recap:coupon', title: tr(s, 'btnCoupon') });
+      options.push({ id: 'recap:cancel', title: tr(s, 'btnCancel') });
+      offer(s, join(intro, soldOut, lines.join('\n'), tr(s, 'recapPrompt')), options);
     },
     handle(s, input) {
       const id = pick(s, input) || (isYes(input) ? 'recap:confirm' : null);
-      if (id === 'recap:confirm') return confirmOrder(s);
+      if (id === 'recap:confirm') return goPayment(s);
       if (id === 'recap:edit') return go(s, STATES.EDIT_CART);
+      if (id === 'recap:coupon') return go(s, STATES.ASK_COUPON);
       if (id === 'recap:cancel') return cancelFlow(s);
       reprompt(s, tr(s, 'invalidChoice'));
+    },
+  },
+
+  // "🎟️ J'ai un code promo" — one code per order, re-checked when the order is placed.
+  [STATES.ASK_COUPON]: {
+    enter(s, intro) {
+      offer(s, join(intro, tr(s, 'askCoupon')), [{ id: 'coupon:skip', title: tr(s, 'btnSkipCoupon') }]);
+    },
+    handle(s, input) {
+      if (pick(s, input) === 'coupon:skip') return go(s, STATES.RECAP);
+      const code = coupons.normalizeCode(input.type === 'text' ? input.raw : '');
+      if (!code) return reprompt(s, tr(s, 'invalidChoice'));
+      const priced = cart.priceCart(s.ctx.cart || []);
+      const result = coupons.evaluate(code, {
+        customer: s.customer,
+        subtotal: priced.subtotal,
+        deliveryFee: deliveryFeeFor(s.ctx.delivery?.zone),
+      });
+      if (!result.ok) {
+        return reprompt(s, tr(s, `couponRejected.${result.reason}`, { code, min: fmt(s, result.min || 0) }));
+      }
+      s.ctx.coupon = result.coupon.code;
+      go(s, STATES.RECAP, tr(s, 'couponApplied', { code: result.coupon.code, amount: fmt(s, result.discount) }));
+    },
+  },
+
+  [STATES.PICK_PAYMENT]: {
+    enter(s, intro) {
+      offer(s, join(intro, tr(s, 'askPayment')), [
+        { id: 'pay:momo', title: tr(s, 'btnPayMomo') },
+        { id: 'pay:cash', title: tr(s, 'btnPayCash') },
+        { id: 'pay:back', title: tr(s, 'btnModify') },
+      ]);
+    },
+    handle(s, input) {
+      const id = pick(s, input);
+      if (id === 'pay:back') return go(s, STATES.RECAP);
+      if (id !== 'pay:momo' && id !== 'pay:cash') return reprompt(s, tr(s, 'invalidChoice'));
+      s.ctx.payment = id.slice(4);
+      confirmOrder(s);
     },
   },
 
@@ -868,7 +1022,7 @@ const HANDLERS = {
     enter(s, intro) {
       const order = db.getOrder(s.ctx.orderId);
       if (!order || order.status !== 'awaiting_payment') return greetAndMenu(s, intro);
-      const { momoOrange, momoAirtel, momoHolder } = config.shop;
+      const { momoOrange, momoAirtel, momoHolder } = settings.get();
       ask(
         s,
         join(

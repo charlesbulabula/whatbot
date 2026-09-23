@@ -3,7 +3,7 @@ import express from 'express';
 import { config, assertConfig } from './config.js';
 import { logger } from './utils/logger.js';
 import { seedIfEmpty } from './db/seed.js';
-import { db, ping } from './db/index.js';
+import { db, ping, seedZonesIfEmpty } from './db/index.js';
 import { webhookRouter } from './whatsapp/webhook.js';
 import { adminRouter } from './admin/router.js';
 import { routeRouter } from './admin/route.js';
@@ -15,6 +15,10 @@ if (missing.length) logger.warn(`Missing configuration, some features are disabl
 
 const seeded = seedIfEmpty();
 if (seeded) logger.info(`Seeded ${seeded} starter products`);
+
+// DELIVERY_ZONES / DELIVERY_FEE only seed the areas table; the dashboard owns it afterwards.
+const seededZones = seedZonesIfEmpty(config.shop.zones, config.shop.deliveryFee);
+if (seededZones) logger.info(`Seeded ${seededZones} delivery areas`);
 
 export const app = express();
 app.disable('x-powered-by');
