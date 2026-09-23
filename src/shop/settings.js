@@ -42,6 +42,11 @@ function defaults() {
     adminNotifyNumber: config.shop.adminNotifyNumber,
     alertEmail: config.smtp.to,
     emailAlerts: true,
+    dailyReport: false, // one summary email at the end of the day
+    // Loyalty rules, seeded from .env then owned by the dashboard.
+    loyaltyEvery: config.loyalty.every,
+    loyaltyReward: config.loyalty.reward,
+    referralReward: config.loyalty.referralReward,
     momoEnabled: true,
     cashEnabled: false, // opt-in: cash on delivery changes how the rider is briefed
     closed: false, // manual "closed now" switch, independent of the opening hours
@@ -75,6 +80,10 @@ function normalize(raw) {
     adminNotifyNumber: digits(s.adminNotifyNumber),
     alertEmail: String(s.alertEmail || '').trim().slice(0, 120),
     emailAlerts: Boolean(s.emailAlerts),
+    dailyReport: Boolean(s.dailyReport),
+    loyaltyEvery: toInt(s.loyaltyEvery),
+    loyaltyReward: toInt(s.loyaltyReward),
+    referralReward: toInt(s.referralReward),
     momoEnabled: Boolean(s.momoEnabled),
     cashEnabled: Boolean(s.cashEnabled),
     closed: Boolean(s.closed),

@@ -64,12 +64,13 @@ function once(key) {
 
 /** Loyalty credit every Nth order, referral credit for the referrer, and the referral code after order #2. */
 export async function rewardsAfterPayment(order) {
-  const L = config.loyalty;
+  const shop = settings.get();
+  const L = { every: shop.loyaltyEvery, reward: shop.loyaltyReward, referralReward: shop.referralReward };
   const c = db.getCustomerById(order.customer_id);
   const locale = normalizeLocale(c.locale);
 
   if (L.every > 0 && L.reward > 0 && c.orders_count > 0 && c.orders_count % L.every === 0 && once(`loyalty:${c.id}:${c.orders_count}`)) {
-    db.addCredit(c.id, L.reward);
+    db.recordCredit(c.id, L.reward, { reason: 'loyalty', detail: `commande #${c.orders_count}` });
     await safeNotify(c, {
       message: text(c.phone, t(locale, 'loyaltyRewardEarned', { count: c.orders_count, amount: money(locale, L.reward) })),
     });
@@ -78,7 +79,7 @@ export async function rewardsAfterPayment(order) {
   if (L.referralReward > 0 && c.referred_by && once(`referral:${c.id}`)) {
     const referrer = db.getCustomerById(c.referred_by);
     if (referrer) {
-      db.addCredit(referrer.id, L.referralReward);
+      db.recordCredit(referrer.id, L.referralReward, { reason: 'referral', detail: c.name || c.phone });
       const rLocale = normalizeLocale(referrer.locale);
       await safeNotify(referrer, {
         message: text(referrer.phone, t(rLocale, 'referralRewardEarned', { amount: money(rLocale, L.referralReward) })),

@@ -3,11 +3,12 @@ import { config } from '../config.js';
 import { logger } from '../utils/logger.js';
 import * as db from '../db/index.js';
 import * as settings from '../shop/settings.js';
-import { t, normalizeLocale } from '../i18n/index.js';
+import { t, normalizeLocale, DEFAULT_LOCALE, money } from '../i18n/index.js';
 import { text } from '../bot/messages.js';
 import { notify } from '../bot/notify.js';
 import { REMINDABLE_STATES, STATES, surveyMessage } from '../bot/engine.js';
 import { fallbackName } from '../bot/orders.js';
+import { sendAlert } from '../mail.js';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -119,7 +120,51 @@ export async function runJobs(now = new Date()) {
   await safely('surveys', surveys);
   await safely('weeklyReminder', () => weeklyReminder(now));
   await safely('waitlistRelease', waitlistRelease);
+  await safely('dailyReport', () => dailyReport(now));
   await safely('pruneEvents', () => db.pruneProcessedEvents());
+}
+
+/**
+ * One summary email at the end of the day: what sold, what is still owed and
+ * what to buy for tomorrow. Sent once per day, at the shop's closing hour.
+ */
+export async function dailyReport(now = new Date()) {
+  const shop = settings.get();
+  if (!shop.dailyReport) return false;
+
+  const today = now.toLocaleDateString('en-CA');
+  if (db.getSetting(`daily-report:${today}`)) return false;
+
+  // Wait until the shop has closed for the day (or 20:00 if it never closes).
+  const window = shop.hours[now.getDay()];
+  const closeHour = window ? Number(window.close.slice(0, 2)) : 20;
+  if (now.getHours() < closeHour) return false;
+
+  const orders = db.ordersForDay(today).filter((o) => o.status !== 'cancelled');
+  const paid = orders.filter((o) => o.paid_at);
+  const cash = db.cashToCollect(today);
+  const toCheck = orders.filter((o) => o.status === 'awaiting_payment').length;
+  const shopping = db.shoppingList(today);
+  const L = DEFAULT_LOCALE;
+
+  const lines = [
+    `${t(L, 'reportOrders')} : ${orders.length}`,
+    `${t(L, 'reportRevenue')} : ${money(L, paid.reduce((sum, o) => sum + o.total, 0))}`,
+    `${t(L, 'reportToCheck')} : ${toCheck}`,
+    cash.orders ? `${t(L, 'reportCash')} : ${money(L, cash.amount)} (${cash.orders})` : null,
+    '',
+    t(L, 'reportShopping'),
+    ...(shopping.length
+      ? shopping.map((r) => `- ${r.name_fr} ${t(L, `sizes.${r.size}`)} × ${r.qty}`)
+      : [`- ${t(L, 'reportNothing')}`]),
+  ].filter((l) => l !== null);
+
+  const result = await sendAlert({ subject: `${t(L, 'reportSubject')} ${today}`, text: lines.join('\n') });
+  // Mark it done even when the send was skipped, so a missing SMTP server does
+  // not make the job retry every minute for the rest of the evening.
+  db.setSetting(`daily-report:${today}`, new Date().toISOString());
+  if (result === 'sent') logger.info(`Daily report emailed for ${today}`);
+  return result === 'sent';
 }
 
 export function startScheduler() {

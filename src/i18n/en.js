@@ -203,4 +203,14 @@ export default {
     `Please have the exact amount ready if you can 🙏 We will confirm when the rider leaves.`,
   adminCashOrder: (p) => `💵 Cash-on-delivery order\n${p.ref} — ${p.total}\n${p.name}, ${p.zone}\n${p.url}`,
 
+
+  /* --------------------------- daily report ---------------------------- */
+  reportSubject: 'Daily summary',
+  reportOrders: 'Orders',
+  reportRevenue: 'Revenue collected',
+  reportToCheck: 'Payments to check',
+  reportCash: 'Cash to collect',
+  reportShopping: 'To buy / prepare:',
+  reportNothing: 'nothing for today',
+
 };

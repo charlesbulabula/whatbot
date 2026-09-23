@@ -21,6 +21,10 @@ const ADDED_COLUMNS = [
   ['orders', 'payment_method', "TEXT NOT NULL DEFAULT 'momo'"],
   ['orders', 'coupon', 'TEXT'],
   ['orders', 'coupon_discount', 'INTEGER NOT NULL DEFAULT 0'],
+  ['customers', 'tags', 'TEXT'],
+  ['customers', 'blocked', 'INTEGER NOT NULL DEFAULT 0'],
+  ['products', 'stock_qty', 'INTEGER'],
+  ['products', 'stock_alert', 'INTEGER NOT NULL DEFAULT 0'],
 ];
 for (const [table, column, type] of ADDED_COLUMNS) {
   const exists = db.prepare(`SELECT 1 FROM pragma_table_info(?) WHERE name = ?`).get(table, column);
@@ -63,7 +67,10 @@ export function touchCustomer(phone) {
   return { customer: getCustomer(phone), isNew: true };
 }
 
-const CUSTOMER_FIELDS = ['name', 'neighborhood', 'address_note', 'locale', 'marketing_opt_out', 'waitlist_since', 'referred_by'];
+const CUSTOMER_FIELDS = [
+  'name', 'neighborhood', 'address_note', 'locale', 'marketing_opt_out', 'waitlist_since', 'referred_by',
+  'tags', 'blocked',
+];
 
 export function updateCustomer(id, fields) {
   const keys = CUSTOMER_FIELDS.filter((k) => fields[k] !== undefined);
@@ -142,10 +149,13 @@ export function createProduct(p) {
   return getProduct(info.lastInsertRowid);
 }
 
+const PRODUCT_FIELDS = [
+  'name_fr', 'name_en', 'emoji', 'price_small', 'price_medium', 'price_large',
+  'in_stock', 'sort_order', 'stock_qty', 'stock_alert',
+];
+
 export function updateProduct(id, p) {
-  const keys = ['name_fr', 'name_en', 'emoji', 'price_small', 'price_medium', 'price_large', 'in_stock', 'sort_order'].filter(
-    (k) => p[k] !== undefined,
-  );
+  const keys = PRODUCT_FIELDS.filter((k) => p[k] !== undefined);
   if (!keys.length) return getProduct(id);
   db.prepare(`UPDATE products SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`).run(
     ...keys.map((k) => p[k]),
@@ -227,7 +237,11 @@ export function createOrder({
     for (const it of items) {
       insertItem.run(info.lastInsertRowid, it.productId, it.size, it.quantity, it.unitPrice, it.unitPrice * it.quantity);
     }
-    if (discount > 0) addCredit(customer.id, -discount);
+    if (discount > 0) {
+      db.prepare(`INSERT INTO credit_entries (customer_id, amount, reason, order_id) VALUES (?, ?, 'order', ?)`)
+        .run(customer.id, -discount, info.lastInsertRowid);
+      addCredit(customer.id, -discount);
+    }
     if (coupon) {
       db.prepare('UPDATE coupons SET used_count = used_count + 1 WHERE id = ?').run(coupon.id);
       db.prepare('INSERT INTO coupon_uses (coupon_id, customer_id, order_id) VALUES (?, ?, ?)')
@@ -275,7 +289,11 @@ export function setOrderStatus(id, status, { eta } = {}) {
     }
 
     if (status === 'cancelled' && before.status !== 'cancelled') {
-      if (before.discount > 0) addCredit(before.customer_id, before.discount);
+      if (before.discount > 0) {
+        db.prepare(`INSERT INTO credit_entries (customer_id, amount, reason, order_id) VALUES (?, ?, 'refund', ?)`)
+          .run(before.customer_id, before.discount, id);
+        addCredit(before.customer_id, before.discount);
+      }
       const use = db.prepare('SELECT coupon_id FROM coupon_uses WHERE order_id = ?').get(id);
       if (use) {
         db.prepare('UPDATE coupons SET used_count = MAX(0, used_count - 1) WHERE id = ?').run(use.coupon_id);
@@ -720,4 +738,338 @@ export function searchCustomers({ query = '', segment = '' } = {}) {
   }
   const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
   return db.prepare(`SELECT * FROM customers ${where} ORDER BY orders_count DESC, created_at DESC LIMIT 500`).all(...params);
+}
+
+/* ---------------------------- credit ledger ----------------------------- */
+// addCredit() only moves the balance; recordCredit() also explains why, so the
+// customer page can show where every franc came from.
+
+export function recordCredit(customerId, amount, { reason = 'manual', detail = null, orderId = null, author = null } = {}) {
+  const tx = db.transaction(() => {
+    db.prepare(
+      `INSERT INTO credit_entries (customer_id, amount, reason, detail, order_id, author) VALUES (?, ?, ?, ?, ?, ?)`,
+    ).run(customerId, amount, reason, detail, orderId, author);
+    addCredit(customerId, amount);
+  });
+  tx();
+  return getCustomerById(customerId);
+}
+
+export function creditHistory(customerId, limit = 50) {
+  return db
+    .prepare('SELECT * FROM credit_entries WHERE customer_id = ? ORDER BY created_at DESC, id DESC LIMIT ?')
+    .all(customerId, limit);
+}
+
+/* ---------------------------- customer notes ---------------------------- */
+
+export function addNote(customerId, body, author) {
+  db.prepare('INSERT INTO customer_notes (customer_id, body, author) VALUES (?, ?, ?)').run(customerId, body, author);
+}
+
+export function notesFor(customerId) {
+  return db.prepare('SELECT * FROM customer_notes WHERE customer_id = ? ORDER BY created_at DESC, id DESC').all(customerId);
+}
+
+export function deleteNote(id) {
+  db.prepare('DELETE FROM customer_notes WHERE id = ?').run(id);
+}
+
+/* ------------------------------- audit log ------------------------------ */
+
+export function audit(actor, action, target = null, detail = null) {
+  db.prepare('INSERT INTO audit_log (actor, action, target, detail) VALUES (?, ?, ?, ?)').run(actor, action, target, detail);
+  // Keep the log bounded: a year of dashboard activity is plenty.
+  db.prepare("DELETE FROM audit_log WHERE created_at < datetime('now', '-1 year')").run();
+}
+
+export function auditLog({ limit = 100, offset = 0 } = {}) {
+  return db.prepare('SELECT * FROM audit_log ORDER BY id DESC LIMIT ? OFFSET ?').all(limit, offset);
+}
+
+export const auditCount = () => db.prepare('SELECT COUNT(*) AS n FROM audit_log').get().n;
+
+/* -------------------------------- expenses ------------------------------ */
+
+export function listExpenses(fromDay, toDay) {
+  return db.prepare('SELECT * FROM expenses WHERE day BETWEEN ? AND ? ORDER BY day DESC, id DESC').all(fromDay, toDay);
+}
+
+export function createExpense({ day, category, label, amount }) {
+  const info = db
+    .prepare('INSERT INTO expenses (day, category, label, amount) VALUES (?, ?, ?, ?)')
+    .run(day, category, label, amount);
+  return db.prepare('SELECT * FROM expenses WHERE id = ?').get(info.lastInsertRowid);
+}
+
+export function deleteExpense(id) {
+  db.prepare('DELETE FROM expenses WHERE id = ?').run(id);
+}
+
+export function expenseTotal(fromDay, toDay) {
+  return db.prepare('SELECT COALESCE(SUM(amount), 0) AS total FROM expenses WHERE day BETWEEN ? AND ?').get(fromDay, toDay).total;
+}
+
+export function expensesByCategory(fromDay, toDay) {
+  return db
+    .prepare('SELECT category, SUM(amount) AS total FROM expenses WHERE day BETWEEN ? AND ? GROUP BY category ORDER BY total DESC')
+    .all(fromDay, toDay);
+}
+
+/* -------------------------- referrals & loyalty ------------------------- */
+
+/** Customers this one brought in, with what they have spent since. */
+export function referredBy(customerId) {
+  return db
+    .prepare('SELECT * FROM customers WHERE referred_by = ? ORDER BY created_at DESC')
+    .all(customerId);
+}
+
+/** Leaderboard of the customers who brought in the most paying friends. */
+export function topReferrers(limit = 20) {
+  return db
+    .prepare(
+      `SELECT c.*, COUNT(f.id) AS invited, COALESCE(SUM(f.total_spent), 0) AS invited_spent
+         FROM customers c JOIN customers f ON f.referred_by = c.id
+        GROUP BY c.id ORDER BY invited DESC, invited_spent DESC LIMIT ?`,
+    )
+    .all(limit);
+}
+
+export function referralTotals() {
+  return db
+    .prepare(
+      `SELECT COUNT(*) AS invited,
+              SUM(CASE WHEN orders_count > 0 THEN 1 ELSE 0 END) AS converted,
+              COALESCE(SUM(total_spent), 0) AS spent
+         FROM customers WHERE referred_by IS NOT NULL`,
+    )
+    .get();
+}
+
+export function creditTotals() {
+  return db
+    .prepare(
+      `SELECT COALESCE(SUM(credit), 0) AS outstanding,
+              (SELECT COALESCE(SUM(amount), 0) FROM credit_entries WHERE amount > 0) AS granted,
+              (SELECT COALESCE(-SUM(amount), 0) FROM credit_entries WHERE amount < 0) AS spent
+         FROM customers`,
+    )
+    .get();
+}
+
+/* ------------------------------ global search --------------------------- */
+
+/** One search box for orders, customers and promo codes. */
+export function globalSearch(query, limit = 6) {
+  const like = `%${query}%`;
+  const orders = db
+    .prepare(
+      `SELECT o.id, o.reference, o.status, o.total, o.customer_name
+         FROM orders o WHERE o.reference LIKE ? OR o.customer_name LIKE ?
+        ORDER BY o.id DESC LIMIT ?`,
+    )
+    .all(like, like, limit);
+  const customers = db
+    .prepare(
+      `SELECT id, name, phone, neighborhood FROM customers
+        WHERE name LIKE ? OR phone LIKE ? OR referral_code LIKE ?
+        ORDER BY orders_count DESC LIMIT ?`,
+    )
+    .all(like, like, `%${query.toUpperCase()}%`, limit);
+  const coupons = db.prepare('SELECT id, code, kind, value FROM coupons WHERE code LIKE ? LIMIT ?').all(`%${query.toUpperCase()}%`, limit);
+  return { orders, customers, coupons };
+}
+
+/* ------------------------- orders: list with filters -------------------- */
+
+const ORDER_SORTS = {
+  date: 'o.created_at',
+  total: 'o.total',
+  status: 'o.status',
+  customer: 'o.customer_name',
+};
+
+/**
+ * Filtered, sorted, paginated order list for the Orders page.
+ * Returns { rows, total } where rows carry their items and customer.
+ */
+export function searchOrders({
+  query = '', status = '', zone = '', payment = '', from = '', to = '',
+  sort = 'date', dir = 'desc', limit = 25, offset = 0,
+} = {}) {
+  const where = [];
+  const params = [];
+  if (query) {
+    where.push('(o.reference LIKE ? OR o.customer_name LIKE ? OR c.phone LIKE ?)');
+    params.push(`%${query}%`, `%${query}%`, `%${query}%`);
+  }
+  if (status) {
+    where.push('o.status = ?');
+    params.push(status);
+  }
+  if (zone) {
+    where.push('o.neighborhood = ?');
+    params.push(zone);
+  }
+  if (payment) {
+    where.push('o.payment_method = ?');
+    params.push(payment);
+  }
+  const orderDay = "date(o.created_at, 'localtime')"; // qualified: the query joins customers
+  if (from) {
+    where.push(`${orderDay} >= ?`);
+    params.push(from);
+  }
+  if (to) {
+    where.push(`${orderDay} <= ?`);
+    params.push(to);
+  }
+  const sql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+  const order = `${ORDER_SORTS[sort] || ORDER_SORTS.date} ${dir === 'asc' ? 'ASC' : 'DESC'}`;
+  const total = db
+    .prepare(`SELECT COUNT(*) AS n FROM orders o JOIN customers c ON c.id = o.customer_id ${sql}`)
+    .get(...params).n;
+  const ids = db
+    .prepare(`SELECT o.id FROM orders o JOIN customers c ON c.id = o.customer_id ${sql} ORDER BY ${order}, o.id DESC LIMIT ? OFFSET ?`)
+    .all(...params, limit, offset)
+    .map((r) => r.id);
+  return { rows: ids.map(getOrder), total };
+}
+
+const CUSTOMER_SORTS = {
+  orders: 'orders_count',
+  spent: 'total_spent',
+  recent: 'last_seen_at',
+  created: 'created_at',
+  name: 'name',
+  credit: 'credit',
+};
+
+/** Filtered, sorted, paginated customer list. */
+export function searchCustomersPaged({
+  query = '', segment = '', zone = '', flag = '',
+  sort = 'orders', dir = 'desc', limit = 25, offset = 0,
+} = {}) {
+  const where = [];
+  const params = [];
+  if (query) {
+    where.push('(name LIKE ? OR phone LIKE ? OR neighborhood LIKE ? OR referral_code LIKE ? OR tags LIKE ?)');
+    params.push(`%${query}%`, `%${query}%`, `%${query}%`, `%${query.toUpperCase()}%`, `%${query}%`);
+  }
+  if (segment) {
+    where.push('segment = ?');
+    params.push(segment);
+  }
+  if (zone) {
+    where.push('neighborhood = ?');
+    params.push(zone);
+  }
+  if (flag === 'credit') where.push('credit > 0');
+  if (flag === 'waitlist') where.push('waitlist_since IS NOT NULL');
+  if (flag === 'blocked') where.push('blocked = 1');
+  if (flag === 'optout') where.push('marketing_opt_out = 1');
+  if (flag === 'referred') where.push('referred_by IS NOT NULL');
+  const sql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+  const order = `${CUSTOMER_SORTS[sort] || CUSTOMER_SORTS.orders} ${dir === 'asc' ? 'ASC' : 'DESC'}`;
+  const total = db.prepare(`SELECT COUNT(*) AS n FROM customers ${sql}`).get(...params).n;
+  const rows = db
+    .prepare(`SELECT * FROM customers ${sql} ORDER BY ${order}, id DESC LIMIT ? OFFSET ?`)
+    .all(...params, limit, offset);
+  return { rows, total };
+}
+
+/** Distinct areas that actually appear on orders, for the filter dropdowns. */
+export function usedZones() {
+  return db
+    .prepare("SELECT DISTINCT neighborhood AS zone FROM orders WHERE neighborhood IS NOT NULL AND neighborhood != '' ORDER BY neighborhood")
+    .all()
+    .map((r) => r.zone);
+}
+
+/* ----------------------------- stock levels ----------------------------- */
+
+/** Products at or below their alert threshold (0 = no threshold set). */
+export function lowStockProducts() {
+  return db
+    .prepare('SELECT * FROM products WHERE stock_alert > 0 AND stock_qty IS NOT NULL AND stock_qty <= stock_alert ORDER BY stock_qty')
+    .all();
+}
+
+export function adjustStock(productId, delta) {
+  db.prepare('UPDATE products SET stock_qty = MAX(0, COALESCE(stock_qty, 0) + ?) WHERE id = ?').run(delta, productId);
+  return getProduct(productId);
+}
+
+/* ------------------------- dashboard comparisons ------------------------ */
+
+/** Revenue and order count over a window ending `endOffset` days ago, for trends. */
+export function periodTotals(days, endOffset = 0) {
+  return db
+    .prepare(
+      `SELECT COUNT(*) AS orders, COALESCE(SUM(total), 0) AS revenue
+         FROM orders
+        WHERE status IN (${PAID_SQL})
+          AND ${LOCAL_DAY} <= date('now', 'localtime', ?)
+          AND ${LOCAL_DAY} >  date('now', 'localtime', ?)`,
+    )
+    .get(`-${endOffset} days`, `-${endOffset + days} days`);
+}
+
+/** Orders per status over a period, for the dashboard donut. */
+export function statusBreakdown(days) {
+  return db
+    .prepare(
+      `SELECT status, COUNT(*) AS n FROM orders
+        WHERE ${LOCAL_DAY} >= date('now', 'localtime', ?) GROUP BY status ORDER BY n DESC`,
+    )
+    .all(`-${days - 1} days`);
+}
+
+/** When customers order, by hour of the day (server timezone). */
+export function ordersByHour(days) {
+  return db
+    .prepare(
+      `SELECT CAST(strftime('%H', created_at, 'localtime') AS INTEGER) AS hour, COUNT(*) AS n
+         FROM orders WHERE ${LOCAL_DAY} >= date('now', 'localtime', ?)
+        GROUP BY hour ORDER BY hour`,
+    )
+    .all(`-${days - 1} days`);
+}
+
+/** New customers per day, to pair with the revenue chart. */
+export function newCustomersPerDay(days) {
+  const rows = db
+    .prepare(
+      `SELECT date(created_at, 'localtime') AS day, COUNT(*) AS n FROM customers
+        WHERE date(created_at, 'localtime') >= date('now', 'localtime', ?) GROUP BY day`,
+    )
+    .all(`-${days - 1} days`);
+  return new Map(rows.map((r) => [r.day, r.n]));
+}
+
+/** True when the product appears on at least one order (so it must not be deleted). */
+export function productIsUsed(productId) {
+  return Boolean(db.prepare('SELECT 1 FROM order_items WHERE product_id = ? LIMIT 1').get(productId));
+}
+
+export function deleteProduct(id) {
+  db.prepare('DELETE FROM products WHERE id = ?').run(id);
+}
+
+/** Latest credit movements across all customers, for the loyalty screen. */
+export function recentCreditEntries(limit = 40) {
+  return db
+    .prepare(
+      `SELECT e.*, c.name AS customer_name, c.phone
+         FROM credit_entries e JOIN customers c ON c.id = e.customer_id
+        ORDER BY e.id DESC LIMIT ?`,
+    )
+    .all(limit);
+}
+
+/** One order looked up by its human reference, for the public invoice check. */
+export function getOrderByReference(reference) {
+  const row = db.prepare('SELECT id FROM orders WHERE reference = ?').get(reference);
+  return row ? getOrder(row.id) : null;
 }

@@ -207,4 +207,14 @@ export default {
     `Préparez l’appoint si possible 🙏 Nous vous confirmons le passage du livreur.`,
   adminCashOrder: (p) => `💵 Commande à payer à la livraison\n${p.ref} — ${p.total}\n${p.name}, ${p.zone}\n${p.url}`,
 
+
+  /* --------------------------- daily report ---------------------------- */
+  reportSubject: 'Résumé de la journée',
+  reportOrders: 'Commandes',
+  reportRevenue: 'Chiffre d’affaires encaissé',
+  reportToCheck: 'Paiements à vérifier',
+  reportCash: 'Espèces à encaisser',
+  reportShopping: 'À acheter / préparer :',
+  reportNothing: 'rien pour aujourd’hui',
+
 };

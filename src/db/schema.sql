@@ -124,3 +124,48 @@ CREATE TABLE IF NOT EXISTS coupon_uses (
   created_at        TEXT NOT NULL DEFAULT (datetime('now')),
   PRIMARY KEY (coupon_id, order_id)
 );
+
+CREATE TABLE IF NOT EXISTS customer_notes (
+  id                INTEGER PRIMARY KEY AUTOINCREMENT,
+  customer_id       INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+  body              TEXT NOT NULL,
+  author            TEXT,
+  created_at        TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Every movement of a customer's credit balance, so the total is always explainable.
+CREATE TABLE IF NOT EXISTS credit_entries (
+  id                INTEGER PRIMARY KEY AUTOINCREMENT,
+  customer_id       INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+  amount            INTEGER NOT NULL,                -- signed: + earned, - spent
+  reason            TEXT NOT NULL,                   -- loyalty | referral | manual | order | refund
+  detail            TEXT,
+  order_id          INTEGER REFERENCES orders(id) ON DELETE SET NULL,
+  author            TEXT,
+  created_at        TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- What the dashboard changed, who did it and when.
+CREATE TABLE IF NOT EXISTS audit_log (
+  id                INTEGER PRIMARY KEY AUTOINCREMENT,
+  actor             TEXT NOT NULL,
+  action            TEXT NOT NULL,
+  target            TEXT,
+  detail            TEXT,
+  created_at        TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Purchases and running costs, to turn revenue into an actual margin.
+CREATE TABLE IF NOT EXISTS expenses (
+  id                INTEGER PRIMARY KEY AUTOINCREMENT,
+  day               TEXT NOT NULL,                   -- YYYY-MM-DD
+  category          TEXT NOT NULL DEFAULT 'stock',   -- stock | transport | salaire | autre
+  label             TEXT,
+  amount            INTEGER NOT NULL DEFAULT 0,
+  created_at        TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_notes_customer   ON customer_notes(customer_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_credit_customer  ON credit_entries(customer_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_audit_created    ON audit_log(created_at);
+CREATE INDEX IF NOT EXISTS idx_expenses_day     ON expenses(day);

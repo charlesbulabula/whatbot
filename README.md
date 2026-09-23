@@ -43,6 +43,19 @@ ou mot « english »). Le tableau de bord admin suit la même règle (lien « En
 | **Réglages sans redéploiement** | Nom de la boutique, horaires, numéros mobile money, numéro d'alerte, frais, capacité et commande minimum se modifient depuis le tableau de bord. |
 | **Tableau de bord en temps réel** | Nouveau message, nouvelle commande, changement de statut, demande d'agent : le tableau de bord se met à jour tout seul, sans rechargement manuel (Server-Sent Events). S'il est en train de taper, rien n'est perdu : une pastille propose d'actualiser. |
 | **Alertes e-mail (SMTP)** | En plus de WhatsApp, chaque nouvelle commande et chaque demande d'agent part par e-mail. Indispensable : hors de la fenêtre de 24 h, WhatsApp refuse les messages libres, l'e-mail passe toujours. Bouton « Envoyer un e-mail de test » dans les réglages. |
+| **Facture PDF avec QR vérifiable** | Chaque commande a une facture imprimable. Le QR code ouvre une page publique qui relit la commande en base : une facture authentique se vérifie en deux secondes, une facture inventée est refusée. Bon de préparation et bon d'achat du jour imprimables également. |
+| **Recherche globale** | Une barre en haut de chaque page (raccourci `/`) qui trouve une commande, un client ou un code promo. |
+| **Tableau de bord graphique** | Courbe du chiffre d'affaires avec les nouveaux clients en surimpression, répartition par statut, commandes par heure, meilleures ventes, et comparaison automatique avec la période précédente. |
+| **Filtres, tri, pagination** | Sur les commandes et les clients : recherche, statut, quartier, moyen de paiement, plage de dates, segment, colonnes triables, export CSV du résultat filtré. |
+| **Fiche client complète** | Aperçu avec historique d'activité, commandes, conversation, fidélité et notes — en onglets. Notes internes, étiquettes cherchables, blocage d'un client (le bot cesse alors de lui répondre). |
+| **Grand livre de fidélité** | Chaque mouvement de crédit est expliqué : fidélité, parrainage, ajustement manuel, utilisation, remboursement. Ajustement manuel possible depuis la fiche, jamais en négatif. |
+| **Page parrainage** | Total des filleuls, taux de conversion, classement des meilleurs parrains, et pour chaque client la liste de ses filleuls. |
+| **Dépenses et marge** | Achats de stock, transport, salaires : le chiffre d'affaires devient une marge réelle, avec répartition par catégorie. |
+| **Stock et alerte de seuil** | Quantité par produit et seuil d'alerte ; le tableau de bord prévient quand il reste peu. |
+| **Diffusion ciblée** | Un message à tous les clients joignables, aux réguliers, aux VIP ou à la liste d'attente. Les désabonnés et les clients bloqués sont toujours exclus. |
+| **Journal d'activité** | Tout ce que le tableau de bord modifie est tracé (qui, quoi, quand), conservé un an. |
+| **Rapport quotidien par e-mail** | Un résumé chaque soir après la fermeture : commandes, encaissé, paiements à vérifier, à acheter pour demain. |
+| **Sauvegarde en un clic** | Un fichier SQLite complet téléchargeable depuis les réglages, en plus de la sauvegarde automatique quotidienne. |
 | **Robustesse** | Captures de paiement copiées sur le serveur (les liens Meta expirent), sauvegarde quotidienne de la base (14 jours), migration automatique de la base à chaque mise à jour, blocage après 10 mauvais mots de passe admin, arrêt propre lors des redéploiements. |
 
 **Pas encore fait (phase 2 prévue dans l'architecture) :** vérification automatique du
@@ -178,6 +191,11 @@ Coût indicatif (architecture §3.1) : ~0,004-0,005 $ par message utilitaire hor
     paiement à la livraison, commande minimum, capacité, numéro d'alerte.
   - Thème clair / sombre (icône en haut à droite) ; par défaut celui de l'appareil.
   - Mise à jour en temps réel : pas besoin de recharger la page.
+  - Recherche globale en haut de page (raccourci clavier `/`), menu de compte à droite.
+  - **Fidélité** : crédits en circulation, mouvements, meilleurs parrains.
+  - **Dépenses** : saisie des achats et calcul de la marge.
+  - **Diffusion** : message ciblé aux clients joignables.
+  - **Journal** : tout ce qui a été modifié depuis le tableau de bord.
 - **Alerte admin** : mets ton numéro perso dans `ADMIN_NOTIFY_NUMBER` pour recevoir chaque
   capture de paiement. Écris « Bonjour » au bot une fois par jour depuis ce numéro pour
   garder la fenêtre de 24 h ouverte, ou crée le modèle `admin_alert`.
@@ -185,7 +203,13 @@ Coût indicatif (architecture §3.1) : ~0,004-0,005 $ par message utilitaire hor
 - **Alertes e-mail** : renseigne `SMTP_HOST`, `SMTP_FROM` (et `SMTP_USER` / `SMTP_PASS`) dans le
   `.env` du serveur, puis l'adresse destinataire dans *Réglages → Alertes*. Le bouton
   « Envoyer un e-mail de test » vérifie la connexion. C'est le filet de sécurité quand la
-  fenêtre WhatsApp de 24 h est fermée.
+  fenêtre WhatsApp de 24 h est fermée. Active aussi *Rapport quotidien* pour recevoir
+  le résumé du soir.
+- **Facture** : bouton *Facture* sur une commande → impression ou PDF (via la boîte
+  d'impression du navigateur). Le QR code mène à une page publique de vérification ;
+  aucune donnée personnelle n'y figure à part le prénom.
+- **Impression** : les listes (commandes, clients, dépenses, statistiques) s'impriment
+  proprement — menu, filtres et boutons sont retirés à l'impression.
 - **Livreur** : bouton « 🛵 Feuille de route du livreur » sur le tableau de bord → « Envoyer au livreur par WhatsApp ».
 - **Coût de la commande en texte libre** : environ 1 centime de dollar par phrase analysée avec
   le modèle par défaut (`ANTHROPIC_MODEL=claude-opus-5`). Un modèle plus léger coûte moins

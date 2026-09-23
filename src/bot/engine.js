@@ -110,6 +110,7 @@ const parseUtc = (d) => Date.parse(`${String(d).replace(' ', 'T')}Z`);
 
 function loadSession(msg) {
   const { customer, isNew } = db.touchCustomer(msg.from);
+  if (customer.blocked) return null; // blocked from the dashboard: the bot stays silent
   const conv = db.getConversation(msg.from);
   let state = HANDLERS[conv.state] ? conv.state : STATES.WELCOME;
   let ctx = conv.context || {};
@@ -148,6 +149,13 @@ function describeInbound(msg) {
  */
 export function handleInbound(msg) {
   const s = loadSession(msg);
+  // Blocked customer: the message is still recorded so the dashboard shows it,
+  // but nothing is sent back and no state changes.
+  if (!s) {
+    db.logMessage(msg.from, 'in', describeInbound(msg), msg.mediaId);
+    logger.info(`Ignored a message from blocked customer ${msg.from}`);
+    return { messages: [], tasks: [] };
+  }
   db.logMessage(s.phone, 'in', describeInbound(msg), msg.mediaId);
   try {
     route(s, toInput(msg));
@@ -406,14 +414,14 @@ function greetAndMenu(s, intro, extra) {
 /** Credits a referral code found in a new customer's message. Returns a confirmation line or null. */
 function applyReferral(s, raw) {
   const c = s.customer;
-  const reward = config.loyalty.referralReward;
+  const reward = settings.get().referralReward;
   if (reward <= 0 || c.referred_by || c.orders_count > 0) return null;
   const code = String(raw || '').match(/\bEP[0-9A-F]{6}\b/i)?.[0];
   if (!code) return null;
   const referrer = db.getCustomerByReferralCode(code);
   if (!referrer || referrer.id === c.id) return null;
   db.updateCustomer(c.id, { referred_by: referrer.id });
-  db.addCredit(c.id, reward);
+  db.recordCredit(c.id, reward, { reason: 'referral', detail: referrer.name || referrer.phone });
   s.customer = db.getCustomerById(c.id);
   return tr(s, 'referralApplied', { amount: fmt(s, reward) });
 }
