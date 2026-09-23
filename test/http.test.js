@@ -162,6 +162,14 @@ test('rider route sheet: secret per-day link, rider marks an order delivered, fo
   assert.equal(again.status, 400, 'a rider can only mark on the way / delivered');
 });
 
+test('privacy policy and terms are public (required by Meta to publish the app)', async () => {
+  for (const path of ['/privacy', '/terms']) {
+    const res = await fetch(`${base}${path}`);
+    assert.equal(res.status, 200);
+  }
+  assert.match(await (await fetch(`${base}/privacy`)).text(), /Politique de confidentialité/);
+});
+
 test('stats page renders every period, and the CSV export opens in Excel', async () => {
   for (const days of [7, 30, 90]) {
     const res = await fetch(`${base}/admin/stats?days=${days}`, { headers: { authorization: auth } });

@@ -7,6 +7,7 @@ import { db, ping } from './db/index.js';
 import { webhookRouter } from './whatsapp/webhook.js';
 import { adminRouter } from './admin/router.js';
 import { routeRouter } from './admin/route.js';
+import { legalRouter } from './legal.js';
 import { startScheduler } from './jobs/scheduler.js';
 
 const missing = assertConfig();
@@ -40,6 +41,7 @@ app.get('/healthz', (_req, res) => {
 app.use(webhookRouter);
 app.use('/admin', adminRouter);
 app.use('/route', routeRouter);
+app.use(legalRouter);
 app.get('/', (_req, res) => res.redirect('/admin'));
 
 app.use((err, _req, res, _next) => {
