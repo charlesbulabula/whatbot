@@ -5,13 +5,16 @@ import { esc } from '../ui.js';
 import { CSS, FONT_LINK, FAVICON, icon } from '../theme.js';
 import * as settings from '../../shop/settings.js';
 
-export function loginPage(L, { theme = '', error = '', username = '', next = '', bye = false } = {}) {
+export function loginPage(L, { theme = '', error = '', username = '', next = '', bye = false, signedIn = false } = {}) {
   const shop = settings.get().name;
   const notice = error
     ? `<div class="alert alert--danger">${icon('alert', 18)}<span>${esc(error)}</span></div>`
     : bye
       ? `<div class="alert alert--success">${icon('check', 18)}<span>${esc(L.loggedOut)}</span></div>`
-      : '';
+      : signedIn
+        ? `<div class="alert alert--info">${icon('check', 18)}<span>${esc(L.alreadySignedIn)}
+<a href="/admin">${esc(L.backToDashboard)}</a></span></div>`
+        : '';
   return `<!doctype html><html lang="${L.lang}"${theme ? ` data-bs-theme="${theme}"` : ''}>
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${esc(L.loginTitle)} · ${esc(shop)}</title>${FAVICON}${FONT_LINK}

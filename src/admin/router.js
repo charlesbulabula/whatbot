@@ -82,12 +82,17 @@ const loginBody = express.urlencoded({ extended: false, limit: '4kb' });
 const NEXT_COOKIE = 'admin_next';
 
 adminRouter.get('/login', (req, res) => {
-  if (currentAccount(req)) return res.redirect('/admin');
   const flash = takeFlash(req, res);
+  const back = readCookie(req, NEXT_COOKIE);
   res.type('html').send(views.loginPage(res.locals.L, {
     theme: res.locals.theme,
-    next: safeBack(readCookie(req, NEXT_COOKIE) && decodeURIComponent(readCookie(req, NEXT_COOKIE)), ''),
+    // res.cookie() already percent-encodes, so decode exactly once.
+    next: safeBack(back && decodeURIComponent(back), ''),
     bye: !!flash.message,
+    // Never redirect away from this page. The gate and this route both decide
+    // who you are; the day they disagree, a redirect here becomes an endless
+    // loop in the browser. A link cannot loop.
+    signedIn: !!currentAccount(req),
   }));
 });
 
@@ -158,7 +163,7 @@ adminRouter.use((req, res, next) => {
   // A person gets the sign-in page; a script keeps the 401 it knows how to handle.
   // Where they were headed rides in a cookie, so the URL stays plain.
   if (req.method === 'GET' && (req.get('accept') || '').includes('text/html')) {
-    res.cookie(NEXT_COOKIE, encodeURIComponent(req.originalUrl || '/admin'), {
+    res.cookie(NEXT_COOKIE, req.originalUrl || '/admin', {
       httpOnly: true, sameSite: 'lax', secure: !!req.secure, path: '/admin',
     });
     return res.redirect('/admin/login');

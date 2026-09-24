@@ -103,3 +103,34 @@ test('redirects never carry the message in the URL', async () => {
   assert.match(html, /class="alert/);
   assert.ok(first.headers.getSetCookie().some((c) => /^admin_flash=;/.test(c)), 'and is burnt after being shown');
 });
+
+test('the sign-in page never redirects, so it cannot loop', async () => {
+  // Signed out.
+  const out = await fetch(`${base}/admin/login`, { redirect: 'manual' });
+  assert.equal(out.status, 200);
+
+  // Signed in: still 200, with a way back rather than a redirect.
+  const login = await fetch(`${base}/admin/login`, {
+    method: 'POST',
+    body: new URLSearchParams({ username: 'admin', password: 'pw' }),
+    redirect: 'manual',
+  });
+  const jar = login.headers.getSetCookie().find((c) => c.startsWith('admin_session=')).split(';')[0];
+  const inPage = await fetch(`${base}/admin/login`, { headers: { cookie: jar }, redirect: 'manual' });
+  assert.equal(inPage.status, 200, 'an authenticated visitor is not bounced');
+  assert.match(await inPage.text(), /déjà connecté/);
+});
+
+test('after signing in you land on the page you asked for', async () => {
+  const gate = await fetch(`${base}/admin/customers`, {
+    headers: { accept: 'text/html' },
+    redirect: 'manual',
+  });
+  const nextCookie = gate.headers.getSetCookie().find((c) => c.startsWith('admin_next='));
+  assert.ok(nextCookie, 'where you were headed is remembered');
+
+  const page = await fetch(`${base}/admin/login`, {
+    headers: { cookie: nextCookie.split(';')[0] },
+  });
+  assert.match(await page.text(), /name="next" value="\/admin\/customers"/);
+});
