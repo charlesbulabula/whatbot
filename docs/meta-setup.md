@@ -162,6 +162,30 @@ noms ci-dessus dans les secrets GitHub correspondants et redéployez.
 
 ---
 
+## Une alternative : le serveur MCP de Meta
+
+Meta publie un serveur MCP **WhatsApp Business Tools** (bêta) qui expose, à un
+assistant comme Claude, exactement les opérations bloquées ici : lister les
+portefeuilles et comptes WhatsApp administrés, ajouter et vérifier un numéro,
+gérer les modèles, configurer le webhook, **et générer un jeton d'utilisateur
+système**.
+
+- URL : `https://mcp.facebook.com/whatsapp_business_tools`
+- Authentification : OAuth avec votre compte développeur Meta
+- Portées demandées : `business_management`, `whatsapp_business_management`,
+  `whatsapp_business_messaging`
+
+Il n'est pas dans l'annuaire de connecteurs de Claude : ajoutez-le comme
+**connecteur personnalisé** avec cette URL, puis connectez-vous à Meta.
+
+L'intérêt : la portée `business_management` est précisément celle qui manque au
+jeton de la console, et c'est elle qui empêche aujourd'hui de lire le
+portefeuille ou d'y créer un utilisateur système.
+
+Ses prérequis restent les mêmes : rôle **admin** sur le portefeuille, et rôle
+admin sur une app **rattachée à ce portefeuille**. Il ne remplace rien dans le
+bot — c'est un outil de configuration, pas un composant d'exécution.
+
 ## Rester sur le numéro de test
 
 Tant que vous n'avez pas les documents pour la vérification d'entreprise, le
