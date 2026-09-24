@@ -37,32 +37,26 @@ ${FAVICON}${FONT_LINK}<style>${CSS}</style></head>
 ${href ? `<a class="btn btn--primary" href="${href}">${esc(label)}</a>` : ''}</div></body></html>`;
 }
 
-/** Last route: nothing matched, so the URL is wrong. */
-export function notFoundHandler(req, res) {
+/** Renders the themed error page at any status. Used by the handlers and by routes. */
+export function sendError(req, res, status = 404) {
   const L = copyFor(req);
-  const admin = req.path.startsWith('/admin');
-  res.status(404).type('html').send(
+  const missing = status === 404;
+  res.status(status).type('html').send(
     page(L, {
-      code: 404,
-      title: L.notFoundTitle,
-      text: L.notFoundText,
-      href: admin ? '/admin' : null,
+      code: status,
+      title: missing ? L.notFoundTitle : L.errorTitle,
+      text: missing ? L.notFoundText : L.errorText,
+      href: req.path.startsWith('/admin') ? '/admin' : null,
       label: L.backAdmin,
     }),
   );
 }
 
+/** Last route: nothing matched, so the URL is wrong. */
+export const notFoundHandler = (req, res) => sendError(req, res, 404);
+
 /** Anything thrown by a route ends here. The reason goes to the log, never to the page. */
 export function errorHandler(err, req, res, _next) {
   logger.error('Unhandled error:', err.stack || err.message);
-  const L = copyFor(req);
-  res.status(err.status || 500).type('html').send(
-    page(L, {
-      code: err.status || 500,
-      title: L.errorTitle,
-      text: L.errorText,
-      href: req.path.startsWith('/admin') ? '/admin' : null,
-      label: L.backAdmin,
-    }),
-  );
+  sendError(req, res, err.status || 500);
 }

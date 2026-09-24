@@ -6,6 +6,7 @@ import QRCode from 'qrcode';
 import { config } from '../config.js';
 import { logger } from '../utils/logger.js';
 import * as db from '../db/index.js';
+import { sendError } from '../errors.js';
 import { DEFAULT_LOCALE, normalizeLocale, t } from '../i18n/index.js';
 import { changeOrderStatus, ORDER_STATUSES, storeProof } from '../bot/orders.js';
 import { downloadMedia, send } from '../whatsapp/client.js';
@@ -321,7 +322,7 @@ function orderTimeline(L, order) {
 adminRouter.get('/orders/:id', (req, res) => {
   const { L, locale } = res.locals;
   const order = db.getOrder(Number(req.params.id));
-  if (!order) return res.status(404).send('Not found');
+  if (!order) return sendError(req, res, 404);
   res.send(views.orderPage(L, locale, {
     order,
     messages: db.messagesFor(order.customer.phone),
@@ -341,7 +342,7 @@ adminRouter.post('/orders/:id/status', async (req, res) => {
   try {
     const eta = str(req.body.eta, 40) || undefined;
     const result = await changeOrderStatus(Number(req.params.id), status, { eta });
-    if (!result) return res.status(404).send('Not found');
+    if (!result) return sendError(req, res, 404);
     log(res, 'order.status', result.order.reference, status);
     res.redirect(withFlash(back, L.notified[result.notified] || L.saved));
   } catch (err) {
@@ -390,7 +391,7 @@ export const invoiceUrl = (order) => `${config.publicUrl}/v/${encodeURIComponent
 adminRouter.get('/orders/:id/invoice', async (req, res) => {
   const { L, locale } = res.locals;
   const order = db.getOrder(Number(req.params.id));
-  if (!order) return res.status(404).send('Not found');
+  if (!order) return sendError(req, res, 404);
   const url = invoiceUrl(order);
   const qrSvg = await QRCode.toString(url, {
     type: 'svg', margin: 0, errorCorrectionLevel: 'M', color: { light: '#0000', dark: '#000000' },
@@ -401,7 +402,7 @@ adminRouter.get('/orders/:id/invoice', async (req, res) => {
 adminRouter.get('/orders/:id/ticket', (req, res) => {
   const { L, locale } = res.locals;
   const order = db.getOrder(Number(req.params.id));
-  if (!order) return res.status(404).send('Not found');
+  if (!order) return sendError(req, res, 404);
   res.send(views.ticketPage(L, locale, { order, shop: settings.get() }));
 });
 
@@ -635,7 +636,7 @@ function customerTimeline(L, customer, orders, credits, notes) {
 adminRouter.get('/customers/:id', (req, res) => {
   const { L, locale } = res.locals;
   const customer = db.getCustomerById(Number(req.params.id));
-  if (!customer) return res.status(404).send('Not found');
+  if (!customer) return sendError(req, res, 404);
   const tab = ['overview', 'orders', 'chat', 'loyalty', 'notes'].includes(req.query.tab) ? req.query.tab : 'overview';
   const orders = db.ordersForCustomer(customer.id, 100);
   const paid = orders.filter((o) => o.paid_at);
@@ -669,7 +670,7 @@ adminRouter.get('/customers/:id', (req, res) => {
 adminRouter.post('/customers/:id/reply', async (req, res) => {
   const { L } = res.locals;
   const customer = db.getCustomerById(Number(req.params.id));
-  if (!customer) return res.status(404).send('Not found');
+  if (!customer) return sendError(req, res, 404);
   const back = `/admin/customers/${customer.id}?tab=chat`;
   const body = str(req.body.body, 4000);
   if (!body) return res.redirect(back);
@@ -686,7 +687,7 @@ adminRouter.post('/customers/:id/reply', async (req, res) => {
 
 adminRouter.post('/customers/:id/takeover', (req, res) => {
   const customer = db.getCustomerById(Number(req.params.id));
-  if (!customer) return res.status(404).send('Not found');
+  if (!customer) return sendError(req, res, 404);
   db.setConversationState(customer.phone, 'HUMAN', {});
   log(res, 'customer.takeover', customer.phone);
   res.redirect(withFlash(`/admin/customers/${customer.id}?tab=chat`, res.locals.L.tookOver));
@@ -694,7 +695,7 @@ adminRouter.post('/customers/:id/takeover', (req, res) => {
 
 adminRouter.post('/customers/:id/release', async (req, res) => {
   const customer = db.getCustomerById(Number(req.params.id));
-  if (!customer) return res.status(404).send('Not found');
+  if (!customer) return sendError(req, res, 404);
   db.setConversationState(customer.phone, 'DONE', {});
   if (inServiceWindow(customer)) {
     await send(text(customer.phone, t(normalizeLocale(customer.locale), 'handoffEnded'))).catch((err) =>
@@ -708,7 +709,7 @@ adminRouter.post('/customers/:id/release', async (req, res) => {
 adminRouter.post('/customers/:id/credit', (req, res) => {
   const { L } = res.locals;
   const customer = db.getCustomerById(Number(req.params.id));
-  if (!customer) return res.status(404).send('Not found');
+  if (!customer) return sendError(req, res, 404);
   const back = `/admin/customers/${customer.id}?tab=loyalty`;
   const amount = Math.round(Number(req.body.amount) || 0);
   if (!amount) return res.redirect(withFlash(back, L.creditNeedsAmount));
@@ -722,7 +723,7 @@ adminRouter.post('/customers/:id/credit', (req, res) => {
 
 adminRouter.post('/customers/:id/notes', (req, res) => {
   const customer = db.getCustomerById(Number(req.params.id));
-  if (!customer) return res.status(404).send('Not found');
+  if (!customer) return sendError(req, res, 404);
   const body = str(req.body.body, 1000);
   if (body) {
     db.addNote(customer.id, body, res.locals.actor);
@@ -738,7 +739,7 @@ adminRouter.post('/customers/:id/notes/:noteId/delete', (req, res) => {
 
 adminRouter.post('/customers/:id/tags', (req, res) => {
   const customer = db.getCustomerById(Number(req.params.id));
-  if (!customer) return res.status(404).send('Not found');
+  if (!customer) return sendError(req, res, 404);
   const tags = parseTags(req.body.tags).join(', ');
   db.updateCustomer(customer.id, { tags });
   log(res, 'customer.tags', customer.phone, tags);
@@ -747,7 +748,7 @@ adminRouter.post('/customers/:id/tags', (req, res) => {
 
 adminRouter.post('/customers/:id/block', (req, res) => {
   const customer = db.getCustomerById(Number(req.params.id));
-  if (!customer) return res.status(404).send('Not found');
+  if (!customer) return sendError(req, res, 404);
   const blocked = req.body.blocked === '1' ? 1 : 0;
   db.updateCustomer(customer.id, { blocked });
   log(res, blocked ? 'customer.block' : 'customer.unblock', customer.phone);
@@ -1109,7 +1110,7 @@ adminRouter.post('/staff', (req, res) => {
 adminRouter.post('/staff/:id', (req, res) => {
   const { L } = res.locals;
   const account = staff.get(Number(req.params.id));
-  if (!account) return res.status(404).send('Not found');
+  if (!account) return sendError(req, res, 404);
   const password = String(req.body.password || '');
   if (password && password.length < 8) return res.redirect(`${withFlash('/admin/staff', L.staffNeedsPassword)}&tone=danger`);
   staff.update(account.id, {
@@ -1124,7 +1125,7 @@ adminRouter.post('/staff/:id', (req, res) => {
 
 adminRouter.post('/staff/:id/delete', (req, res) => {
   const account = staff.get(Number(req.params.id));
-  if (!account) return res.status(404).send('Not found');
+  if (!account) return sendError(req, res, 404);
   staff.remove(account.id);
   log(res, 'staff.delete', account.username);
   res.redirect(withFlash('/admin/staff', res.locals.L.saved));
@@ -1183,7 +1184,7 @@ adminRouter.post('/slots/:id/delete', (req, res) => {
 adminRouter.get('/products/:id/edit', (req, res) => {
   const { L, locale } = res.locals;
   const product = db.getProduct(Number(req.params.id));
-  if (!product) return res.status(404).send('Not found');
+  if (!product) return sendError(req, res, 404);
   res.send(views.productPage(L, locale, {
     product,
     variants: db.listVariants(product.id, { onlyActive: false }),
@@ -1206,7 +1207,7 @@ const variantFields = (b) => ({
 
 adminRouter.post('/products/:id/variants', (req, res) => {
   const product = db.getProduct(Number(req.params.id));
-  if (!product) return res.status(404).send('Not found');
+  if (!product) return sendError(req, res, 404);
   const sku = str(req.body.sku, 24).toLowerCase().replace(/[^a-z0-9_-]/g, '');
   const fields = variantFields(req.body);
   if (!sku || !fields.label_fr || !fields.label_en) return res.status(400).send('Missing fields');
@@ -1243,7 +1244,7 @@ const extraFields = (b) => ({
 
 adminRouter.post('/products/:id/extras', (req, res) => {
   const product = db.getProduct(Number(req.params.id));
-  if (!product) return res.status(404).send('Not found');
+  if (!product) return sendError(req, res, 404);
   const fields = extraFields(req.body);
   if (!fields.label_fr || !fields.label_en) return res.status(400).send('Missing fields');
   db.createExtra({ ...fields, product_id: req.body.global === '1' ? null : product.id, active: 1 });
@@ -1266,7 +1267,7 @@ adminRouter.post('/extras/:id/delete', (req, res) => {
 
 adminRouter.post('/products/:id/retailer', (req, res) => {
   const product = db.getProduct(Number(req.params.id));
-  if (!product) return res.status(404).send('Not found');
+  if (!product) return sendError(req, res, 404);
   db.updateProduct(product.id, { retailer_id: str(req.body.retailer_id, 60) || null });
   log(res, 'product.retailer', product.name_fr);
   res.redirect(withFlash(`/admin/products/${product.id}/edit`, res.locals.L.saved));
@@ -1285,7 +1286,7 @@ const upload = multer({
 
 adminRouter.post('/products/:id/photo', upload.single('photo'), (req, res) => {
   const product = db.getProduct(Number(req.params.id));
-  if (!product) return res.status(404).send('Not found');
+  if (!product) return sendError(req, res, 404);
   if (!req.file) return res.redirect(`${withFlash(`/admin/products/${product.id}/edit`, res.locals.L.photoRejected)}&tone=danger`);
   if (product.photo) deleteMedia('products', product.photo);
   db.updateProduct(product.id, { photo: req.file.filename });
@@ -1295,7 +1296,7 @@ adminRouter.post('/products/:id/photo', upload.single('photo'), (req, res) => {
 
 adminRouter.post('/products/:id/photo/delete', (req, res) => {
   const product = db.getProduct(Number(req.params.id));
-  if (!product) return res.status(404).send('Not found');
+  if (!product) return sendError(req, res, 404);
   if (product.photo) deleteMedia('products', product.photo);
   db.updateProduct(product.id, { photo: null });
   log(res, 'product.photo.delete', product.name_fr);
