@@ -177,6 +177,7 @@ export const filterChips = (chips) =>
 const NAV = (L) => [
   { area: 'orders', group: '', items: [
     ['orders', '/admin', L.navOrders, 'receipt'],
+    ['payments', '/admin/payments', L.navPayments, 'cash'],
     ['route', '/admin/route', L.navRoute, 'scooter'],
   ] },
   { area: 'catalogue', group: L.navGroupCatalogue, items: [
@@ -211,7 +212,7 @@ const NAV = (L) => [
 function navCounts() {
   try {
     return {
-      orders: db.pendingProofCount(),
+      payments: db.pendingPayments().length,
       customers: db.handoffConversations().length,
       products: db.lowStockProducts().length,
     };

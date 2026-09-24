@@ -846,6 +846,19 @@ adminRouter.get('/loyalty', (req, res) => {
 
 /* ------------------------------- expenses ------------------------------- */
 
+adminRouter.get('/payments', (req, res) => {
+  const { L, locale } = res.locals;
+  const filter = ['momo', 'cash'].includes(req.query.filter) ? req.query.filter : 'all';
+  res.send(views.paymentsPage(L, locale, {
+    orders: db.pendingPayments(),
+    filter,
+    flash: req.query.flash,
+    theme: res.locals.theme,
+    role: res.locals.role,
+    waHealth: tokenHealth(),
+  }));
+});
+
 adminRouter.get('/expenses', (req, res) => {
   const { L, locale } = res.locals;
   const days = [7, 30, 90].includes(Number(req.query.days)) ? Number(req.query.days) : 30;

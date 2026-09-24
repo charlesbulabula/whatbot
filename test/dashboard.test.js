@@ -383,3 +383,25 @@ test('destructive actions use the themed dialog, never the browser confirm()', a
   assert.doesNotMatch(html, /onsubmit="return confirm/);
   assert.doesNotMatch(html, /onclick="return confirm/);
 });
+
+test('the payment queue gathers everything waiting on a decision', async () => {
+  const cash = seedOrder({ phone: '243870000090', name: 'Espèces Client', paymentMethod: 'cash' });
+  const momo = seedOrder({ phone: '243870000091', name: 'Momo Client' });
+  db.setPaymentProof(momo.order.id, 'media-id-1');
+
+  const html = await (await get('/admin/payments')).text();
+  assert.match(html, new RegExp(momo.order.reference));
+  assert.match(html, new RegExp(cash.order.reference));
+  assert.match(html, /Espèces Client/);
+
+  // The tabs split the two methods.
+  const onlyCash = await (await get('/admin/payments?filter=cash')).text();
+  assert.match(onlyCash, new RegExp(cash.order.reference));
+  assert.doesNotMatch(onlyCash, new RegExp(momo.order.reference));
+
+  // Confirming one takes it out of the queue.
+  await post(`/admin/orders/${momo.order.id}/status`, 'status=paid&back=/admin/payments');
+  const after = await (await get('/admin/payments')).text();
+  assert.doesNotMatch(after, new RegExp(momo.order.reference));
+  assert.match(after, new RegExp(cash.order.reference));
+});

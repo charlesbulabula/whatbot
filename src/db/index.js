@@ -728,6 +728,23 @@ export function cashToCollect(day) {
 }
 
 /** Payments waiting for a manual check today — shown as a sidebar badge. */
+/**
+ * Everything waiting on a payment decision, oldest first -- deliberately not
+ * limited to today: a screenshot left unchecked overnight is exactly the one
+ * that must not disappear from the queue.
+ */
+export function pendingPayments() {
+  return db
+    .prepare(
+      `SELECT o.*, c.name AS customer_name, c.phone AS customer_phone
+         FROM orders o JOIN customers c ON c.id = o.customer_id
+        WHERE o.status = 'awaiting_payment'
+          AND (o.payment_proof IS NOT NULL OR o.payment_method = 'cash')
+        ORDER BY o.created_at ASC`,
+    )
+    .all();
+}
+
 export function pendingProofCount() {
   return db
     .prepare(
