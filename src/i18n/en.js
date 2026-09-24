@@ -25,6 +25,7 @@ export default {
     `Delivery areas: ${p.zones}`,
   cancelled: 'Order cancelled. Type *menu* whenever you want to start again.',
   invalidChoice: 'Sorry, I did not understand 🙏 Please pick an option below.',
+  thanksReply: 'You are welcome 🙏',
   replyWithNumber: 'Reply with the number of your choice.',
   listButton: 'Choose',
   error: 'Oops, something went wrong on our side. Type *menu* to start again.',

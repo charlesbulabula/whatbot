@@ -26,6 +26,7 @@ export default {
     `Zones livrées : ${p.zones}`,
   cancelled: 'Commande annulée. Tapez *menu* quand vous voulez recommencer.',
   invalidChoice: 'Je n’ai pas compris 🙏 Choisissez une option ci-dessous.',
+  thanksReply: 'Avec plaisir 🙏',
   replyWithNumber: 'Répondez avec le numéro de votre choix.',
   listButton: 'Choisir',
   error: 'Oups, une erreur est survenue de notre côté. Tapez *menu* pour recommencer.',

@@ -228,6 +228,29 @@ test('voice notes and unknown input get a helpful reply without losing the step'
   assert.equal(c.state(), 'PICK_SIZE');
 });
 
+test('a greeting is answered, never scolded', () => {
+  const c = customer('243810000031');
+  const first = c.say('Bonjour').last;
+  assert.doesNotMatch(first.body, /Je n’ai pas compris/);
+  assert.equal(c.state(), 'MENU');
+
+  // Said again while the menu is already on screen, it re-offers the menu.
+  const again = c.say('salut').last;
+  assert.doesNotMatch(again.body, /Je n’ai pas compris/);
+  assert.equal(c.state(), 'MENU');
+
+  // Mid-order it repeats the current question instead of restarting.
+  c.tap('menu:order');
+  c.tap('p:1');
+  const mid = c.say('mbote').last;
+  assert.doesNotMatch(mid.body, /Je n’ai pas compris/);
+  assert.equal(c.state(), 'PICK_SIZE');
+
+  const thanks = c.say('merci').last;
+  assert.match(thanks.body, /Avec plaisir/);
+  assert.equal(c.state(), 'PICK_SIZE');
+});
+
 test('a shared location is accepted as the delivery address', () => {
   const c = customer('243810000011');
   c.say('Bonjour');

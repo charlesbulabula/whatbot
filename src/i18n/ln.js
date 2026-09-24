@@ -31,6 +31,7 @@ export default {
     + `Bakartier oyo tokitisaka : ${p.zones}`,
   cancelled: 'Commande eboyami. Koma *menu* soki olingi kobanda lisusu.',
   invalidChoice: 'Nayoki te 🙏 Pona moko na kati ya oyo ezali awa.',
+  thanksReply: 'Eloko te 🙏',
   replyWithNumber: 'Yanola na nimero ya oyo olingi.',
   listButton: 'Pona',
   error: 'Pardon, likambo esalemi epai na biso. Koma *menu* mpo kobanda lisusu.',

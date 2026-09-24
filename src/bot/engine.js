@@ -99,6 +99,14 @@ const KEYWORDS = {
   unsubscribe: words('stop abonnement', 'arreter abonnement', 'annuler abonnement', 'stop subscription', 'cancel subscription'),
   yes: words('oui', 'yes', 'o', 'y', 'ok', 'd accord', 'daccord'),
   no: words('non', 'no', 'n'),
+  // A bare hello is the most common first message of all. Without this it
+  // falls through to "I did not understand", which is a terrible welcome.
+  greeting: words(
+    'bonjour', 'bonsoir', 'bjr', 'salut', 'slt', 'coucou', 'cc',
+    'hello', 'hi', 'hey', 'yo', 'good morning', 'good evening',
+    'mbote', 'sango', 'losako',
+  ),
+  thanks: words('merci', 'merci beaucoup', 'mercii', 'thanks', 'thank you', 'thx', 'matondo'),
 };
 
 /** True for the words that act as commands at any step (menu, annuler, aide...). */
@@ -359,6 +367,16 @@ function handleKeyword(s, input) {
   }
   if (KEYWORDS.menu.has(k)) {
     greetAndMenu(s);
+    return true;
+  }
+  if (KEYWORDS.greeting.has(k)) {
+    // Mid-order, a hello should not throw the basket away: just ask again.
+    if (IDLE.has(s.state)) greetAndMenu(s);
+    else reprompt(s);
+    return true;
+  }
+  if (KEYWORDS.thanks.has(k)) {
+    say(s, tr(s, 'thanksReply'));
     return true;
   }
   if (KEYWORDS.help.has(k)) {
