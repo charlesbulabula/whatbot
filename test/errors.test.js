@@ -39,7 +39,7 @@ test('the dashboard 404 offers a way back, a public one does not', async () => {
 test('a browser gets the sign-in page, a script keeps its 401', async () => {
   const page = await fetch(`${base}/admin`, { headers: { accept: 'text/html' }, redirect: 'manual' });
   assert.equal(page.status, 302);
-  assert.match(page.headers.get('location'), /\/admin\/login/);
+  assert.equal(page.headers.get('location'), '/admin/login');
 
   const script = await fetch(`${base}/admin`);
   assert.equal(script.status, 401);
@@ -70,4 +70,36 @@ test('signing in opens a session, signing out closes it', async () => {
   const forged = `admin_session=${Buffer.from('admin').toString('base64url')}.${Date.now() + 1e6}.deadbeef`;
   const refused = await fetch(`${base}/admin`, { headers: { cookie: forged } });
   assert.equal(refused.status, 401);
+});
+
+test('redirects never carry the message in the URL', async () => {
+  const jar = await (async () => {
+    const res = await fetch(`${base}/admin/login`, {
+      method: 'POST',
+      body: new URLSearchParams({ username: 'admin', password: 'pw' }),
+      redirect: 'manual',
+    });
+    return res.headers.getSetCookie().find((c) => c.startsWith('admin_session=')).split(';')[0];
+  })();
+
+  // A POST that produces a confirmation redirects to a bare path.
+  const saved = await fetch(`${base}/admin/settings`, {
+    method: 'POST',
+    headers: { cookie: jar, origin: base, 'content-type': 'application/x-www-form-urlencoded' },
+    body: 'tab=shop&name=Epices Test',
+    redirect: 'manual',
+  });
+  assert.equal(saved.status, 302);
+  const location = saved.headers.get('location');
+  assert.doesNotMatch(location, /flash=/);
+  assert.doesNotMatch(location, /tone=/);
+  assert.doesNotMatch(location, /%[0-9A-F]{2}/i, 'nothing url-encoded leaks into the path');
+
+  // The message travels in a cookie and shows once.
+  const cookie = saved.headers.getSetCookie().find((c) => c.startsWith('admin_flash='));
+  assert.ok(cookie, 'the confirmation rides in a cookie');
+  const first = await fetch(`${base}${location}`, { headers: { cookie: `${jar}; ${cookie.split(';')[0]}` } });
+  const html = await first.text();
+  assert.match(html, /class="alert/);
+  assert.ok(first.headers.getSetCookie().some((c) => /^admin_flash=;/.test(c)), 'and is burnt after being shown');
 });

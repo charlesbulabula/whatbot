@@ -79,12 +79,15 @@ adminRouter.use((req, res, next) => {
 
 const loginBody = express.urlencoded({ extended: false, limit: '4kb' });
 
+const NEXT_COOKIE = 'admin_next';
+
 adminRouter.get('/login', (req, res) => {
   if (currentAccount(req)) return res.redirect('/admin');
+  const flash = takeFlash(req, res);
   res.type('html').send(views.loginPage(res.locals.L, {
     theme: res.locals.theme,
-    next: safeBack(req.query.next, ''),
-    bye: req.query.bye === '1',
+    next: safeBack(readCookie(req, NEXT_COOKIE) && decodeURIComponent(readCookie(req, NEXT_COOKIE)), ''),
+    bye: !!flash.message,
   }));
 });
 
@@ -118,6 +121,7 @@ adminRouter.post('/login', loginBody, (req, res) => {
   }
   failures.delete(req.ip);
   session.issue(res, account.username, { remember: !!req.body?.remember, secure: req.secure });
+  res.clearCookie(NEXT_COOKIE, { path: '/admin' });
   res.redirect(safeBack(req.body?.next, '/admin'));
 });
 
@@ -152,9 +156,12 @@ adminRouter.use((req, res, next) => {
     logger.warn(`Failed dashboard login from ${req.ip}`);
   }
   // A person gets the sign-in page; a script keeps the 401 it knows how to handle.
+  // Where they were headed rides in a cookie, so the URL stays plain.
   if (req.method === 'GET' && (req.get('accept') || '').includes('text/html')) {
-    const next_ = encodeURIComponent(req.originalUrl || '/admin');
-    return res.redirect(`/admin/login?next=${next_}`);
+    res.cookie(NEXT_COOKIE, encodeURIComponent(req.originalUrl || '/admin'), {
+      httpOnly: true, sameSite: 'lax', secure: !!req.secure, path: '/admin',
+    });
+    return res.redirect('/admin/login');
   }
   res.status(401).type('text/plain').send('Authentication required');
 });
@@ -232,7 +239,8 @@ adminRouter.get('/lang', (req, res) => {
 
 adminRouter.get('/logout', (req, res) => {
   session.clear(res);
-  res.redirect('/admin/login?bye=1');
+  res.clearCookie(NEXT_COOKIE, { path: '/admin' });
+  redirectWith(res, '/admin/login', res.locals.L.loggedOut);
 });
 
 /* ------------------------------- helpers ------------------------------- */
@@ -245,7 +253,35 @@ const shiftDay = (day, delta) => {
 };
 const isDay = (s) => /^\d{4}-\d{2}-\d{2}$/.test(String(s || ''));
 const safeBack = (back, fallback) => (typeof back === 'string' && back.startsWith('/admin') && !back.startsWith('//') ? back : fallback);
-const withFlash = (url, flash) => `${url}${url.includes('?') ? '&' : '?'}flash=${encodeURIComponent(flash)}`;
+const FLASH_COOKIE = 'admin_flash';
+
+/** One-shot confirmation, carried by a cookie so it never appears in the URL. */
+function redirectWith(res, url, message, tone = '') {
+  if (message) {
+    res.cookie(FLASH_COOKIE, JSON.stringify({ m: String(message).slice(0, 300), t: tone }), {
+      httpOnly: true, sameSite: 'lax', secure: !!res.req?.secure, path: '/admin',
+    });
+  }
+  res.redirect(url);
+}
+
+/** Reads the flash and burns it, so a refresh never shows it twice. */
+function takeFlash(req, res) {
+  if (res.locals.flashRead) return res.locals.flashRead;
+  const raw = readCookie(req, FLASH_COOKIE);
+  let value = { message: '', tone: '' };
+  if (raw) {
+    res.clearCookie(FLASH_COOKIE, { path: '/admin' });
+    try {
+      const { m, t } = JSON.parse(decodeURIComponent(raw));
+      value = { message: String(m || '').slice(0, 300), tone: t === 'danger' ? 'danger' : '' };
+    } catch {
+      /* someone hand-edited the cookie */
+    }
+  }
+  res.locals.flashRead = value;
+  return value;
+}
 const toInt = (v) => Math.max(0, Math.round(Number(v) || 0));
 const str = (v, max = 120) => String(v ?? '').trim().slice(0, max);
 const pageOf = (v) => Math.max(0, Math.round(Number(v) || 0));
@@ -314,7 +350,7 @@ adminRouter.get('/', (req, res) => {
       statuses: db.statusBreakdown(30),
       byHour: db.ordersByHour(30).map((h) => ({ label: `${String(h.hour).padStart(2, '0')}h`, value: h.n })),
       topProducts: db.topProducts(30).slice(0, 6),
-      flash: req.query.flash,
+      flash: takeFlash(req, res).message,
       theme: res.locals.theme,
     role: res.locals.role,
     waHealth: res.locals.waHealth,
@@ -353,7 +389,7 @@ adminRouter.get('/orders', (req, res) => {
     zones: db.usedZones(),
     page,
     pageSize: PAGE_SIZE,
-    flash: req.query.flash,
+    flash: takeFlash(req, res).message,
     theme: res.locals.theme,
     role: res.locals.role,
     waHealth: res.locals.waHealth,
@@ -382,7 +418,7 @@ adminRouter.get('/orders/:id', (req, res) => {
     order,
     messages: db.messagesFor(order.customer.phone),
     timeline: orderTimeline(L, order),
-    flash: req.query.flash,
+    flash: takeFlash(req, res).message,
     theme: res.locals.theme,
     role: res.locals.role,
     waHealth: res.locals.waHealth,
@@ -399,10 +435,10 @@ adminRouter.post('/orders/:id/status', async (req, res) => {
     const result = await changeOrderStatus(Number(req.params.id), status, { eta });
     if (!result) return sendError(req, res, 404);
     log(res, 'order.status', result.order.reference, status);
-    res.redirect(withFlash(back, L.notified[result.notified] || L.saved));
+    redirectWith(res, back, L.notified[result.notified] || L.saved);
   } catch (err) {
     logger.error('Status change failed:', err.stack || err.message);
-    res.redirect(withFlash(back, err.message));
+    redirectWith(res, back, err.message);
   }
 });
 
@@ -488,7 +524,7 @@ adminRouter.get('/products', (req, res) => {
   res.send(views.productsPage(L, locale, {
     products: db.listProducts({ onlyInStock: false }),
     lowStock: db.lowStockProducts(),
-    flash: req.query.flash,
+    flash: takeFlash(req, res).message,
     theme: res.locals.theme,
     role: res.locals.role,
     waHealth: res.locals.waHealth,
@@ -501,7 +537,7 @@ adminRouter.post('/products', (req, res) => {
   const sortOrder = db.listProducts({ onlyInStock: false }).reduce((max, p) => Math.max(max, p.sort_order), 0) + 1;
   db.createProduct({ ...fields, sort_order: sortOrder });
   log(res, 'product.create', fields.name_fr);
-  res.redirect(withFlash('/admin/products', res.locals.L.saved));
+  redirectWith(res, '/admin/products', res.locals.L.saved);
 });
 
 adminRouter.post('/products/:id', (req, res) => {
@@ -514,14 +550,14 @@ adminRouter.post('/products/:id', (req, res) => {
     stock_alert: toInt(req.body.stock_alert),
   });
   log(res, 'product.update', fields.name_fr);
-  res.redirect(withFlash('/admin/products', res.locals.L.saved));
+  redirectWith(res, '/admin/products', res.locals.L.saved);
 });
 
 adminRouter.post('/products/:id/stock', (req, res) => {
   const inStock = req.body.in_stock === '1' ? 1 : 0;
   db.updateProduct(Number(req.params.id), { in_stock: inStock });
   log(res, 'product.stock', String(req.params.id), inStock ? 'in' : 'out');
-  res.redirect(withFlash('/admin/products', res.locals.L.saved));
+  redirectWith(res, '/admin/products', res.locals.L.saved);
 });
 
 adminRouter.post('/products/:id/delete', (req, res) => {
@@ -531,11 +567,11 @@ adminRouter.post('/products/:id/delete', (req, res) => {
   if (db.productIsUsed(id)) {
     db.updateProduct(id, { in_stock: 0 });
     log(res, 'product.hide', String(id));
-    return res.redirect(withFlash('/admin/products', res.locals.L.productHidden));
+    return redirectWith(res, '/admin/products', res.locals.L.productHidden);
   }
   db.deleteProduct(id);
   log(res, 'product.delete', String(id));
-  res.redirect(withFlash('/admin/products', res.locals.L.saved));
+  redirectWith(res, '/admin/products', res.locals.L.saved);
 });
 
 /* --------------------------- delivery zones ---------------------------- */
@@ -549,33 +585,33 @@ const zoneFields = (b) => ({
 
 adminRouter.get('/zones', (req, res) => {
   const { L, locale } = res.locals;
-  res.send(views.zonesPage(L, locale, { zones: db.listZones(), flash: req.query.flash, theme: res.locals.theme }));
+  res.send(views.zonesPage(L, locale, { zones: db.listZones(), flash: takeFlash(req, res).message, theme: res.locals.theme }));
 });
 
 adminRouter.post('/zones', (req, res) => {
   const fields = zoneFields(req.body);
   if (!fields.name) return res.status(400).send('Name required');
-  if (db.findZoneByName(fields.name)) return res.redirect(withFlash('/admin/zones', res.locals.L.zoneExists));
+  if (db.findZoneByName(fields.name)) return redirectWith(res, '/admin/zones', res.locals.L.zoneExists);
   const sortOrder = db.listZones().reduce((max, z) => Math.max(max, z.sort_order), 0) + 1;
   db.createZone({ ...fields, active: 1, sort_order: sortOrder });
   log(res, 'zone.create', fields.name);
-  res.redirect(withFlash('/admin/zones', res.locals.L.saved));
+  redirectWith(res, '/admin/zones', res.locals.L.saved);
 });
 
 adminRouter.post('/zones/:id', (req, res) => {
   const fields = zoneFields(req.body);
   if (!fields.name) return res.status(400).send('Name required');
   const clash = db.findZoneByName(fields.name);
-  if (clash && clash.id !== Number(req.params.id)) return res.redirect(withFlash('/admin/zones', res.locals.L.zoneExists));
+  if (clash && clash.id !== Number(req.params.id)) return redirectWith(res, '/admin/zones', res.locals.L.zoneExists);
   db.updateZone(Number(req.params.id), fields);
   log(res, 'zone.update', fields.name, String(fields.fee));
-  res.redirect(withFlash('/admin/zones', res.locals.L.saved));
+  redirectWith(res, '/admin/zones', res.locals.L.saved);
 });
 
 adminRouter.post('/zones/:id/delete', (req, res) => {
   db.deleteZone(Number(req.params.id));
   log(res, 'zone.delete', String(req.params.id));
-  res.redirect(withFlash('/admin/zones', res.locals.L.saved));
+  redirectWith(res, '/admin/zones', res.locals.L.saved);
 });
 
 /* ------------------------------- coupons ------------------------------- */
@@ -593,29 +629,29 @@ const couponFields = (b) => ({
 
 adminRouter.get('/coupons', (req, res) => {
   const { L, locale } = res.locals;
-  res.send(views.couponsPage(L, locale, { coupons: db.listCoupons(), flash: req.query.flash, theme: res.locals.theme }));
+  res.send(views.couponsPage(L, locale, { coupons: db.listCoupons(), flash: takeFlash(req, res).message, theme: res.locals.theme }));
 });
 
 adminRouter.post('/coupons', (req, res) => {
   const fields = couponFields(req.body);
   if (!fields.code) return res.status(400).send('Code required');
-  if (db.getCouponByCode(fields.code)) return res.redirect(withFlash('/admin/coupons', res.locals.L.couponExists));
+  if (db.getCouponByCode(fields.code)) return redirectWith(res, '/admin/coupons', res.locals.L.couponExists);
   db.createCoupon({ ...fields, active: 1 });
   log(res, 'coupon.create', fields.code);
-  res.redirect(withFlash('/admin/coupons', res.locals.L.saved));
+  redirectWith(res, '/admin/coupons', res.locals.L.saved);
 });
 
 adminRouter.post('/coupons/:id', (req, res) => {
   const { code, ...fields } = couponFields(req.body); // the code itself is never renamed
   db.updateCoupon(Number(req.params.id), fields);
   log(res, 'coupon.update', String(req.params.id));
-  res.redirect(withFlash('/admin/coupons', res.locals.L.saved));
+  redirectWith(res, '/admin/coupons', res.locals.L.saved);
 });
 
 adminRouter.post('/coupons/:id/delete', (req, res) => {
   db.deleteCoupon(Number(req.params.id));
   log(res, 'coupon.delete', String(req.params.id));
-  res.redirect(withFlash('/admin/coupons', res.locals.L.saved));
+  redirectWith(res, '/admin/coupons', res.locals.L.saved);
 });
 
 /* ------------------------------- customers ----------------------------- */
@@ -654,7 +690,7 @@ adminRouter.get('/customers', (req, res) => {
       credit: db.creditTotals().outstanding,
       referred: db.referralTotals().invited || 0,
     },
-    flash: req.query.flash,
+    flash: takeFlash(req, res).message,
     theme: res.locals.theme,
     role: res.locals.role,
     waHealth: res.locals.waHealth,
@@ -714,8 +750,8 @@ adminRouter.get('/customers/:id', (req, res) => {
       basket: paid.length ? Math.round(paid.reduce((s, o) => s + o.total, 0) / paid.length) : 0,
       rating: ratings.length ? ratings.reduce((s, o) => s + o.rating, 0) / ratings.length : 0,
     },
-    flash: req.query.flash,
-    flashTone: req.query.tone === 'danger' ? 'danger' : '',
+    flash: takeFlash(req, res).message,
+    flashTone: takeFlash(req, res).tone,
     theme: res.locals.theme,
     role: res.locals.role,
     waHealth: res.locals.waHealth,
@@ -729,14 +765,14 @@ adminRouter.post('/customers/:id/reply', async (req, res) => {
   const back = `/admin/customers/${customer.id}?tab=chat`;
   const body = str(req.body.body, 4000);
   if (!body) return res.redirect(back);
-  if (!inServiceWindow(customer)) return res.redirect(withFlash(back, L.windowClosed));
+  if (!inServiceWindow(customer)) return redirectWith(res, back, L.windowClosed);
   try {
     await send(text(customer.phone, body));
     log(res, 'customer.reply', customer.phone);
-    res.redirect(withFlash(back, L.messageSent));
+    redirectWith(res, back, L.messageSent);
   } catch (err) {
     logger.error('Admin reply failed:', err.message);
-    res.redirect(withFlash(back, `${L.messageFailed}: ${err.message}`));
+    redirectWith(res, back, `${L.messageFailed}: ${err.message}`);
   }
 });
 
@@ -745,7 +781,7 @@ adminRouter.post('/customers/:id/takeover', (req, res) => {
   if (!customer) return sendError(req, res, 404);
   db.setConversationState(customer.phone, 'HUMAN', {});
   log(res, 'customer.takeover', customer.phone);
-  res.redirect(withFlash(`/admin/customers/${customer.id}?tab=chat`, res.locals.L.tookOver));
+  redirectWith(res, `/admin/customers/${customer.id}?tab=chat`, res.locals.L.tookOver);
 });
 
 adminRouter.post('/customers/:id/release', async (req, res) => {
@@ -758,7 +794,7 @@ adminRouter.post('/customers/:id/release', async (req, res) => {
     );
   }
   log(res, 'customer.release', customer.phone);
-  res.redirect(withFlash(`/admin/customers/${customer.id}?tab=chat`, res.locals.L.released));
+  redirectWith(res, `/admin/customers/${customer.id}?tab=chat`, res.locals.L.released);
 });
 
 adminRouter.post('/customers/:id/credit', (req, res) => {
@@ -767,13 +803,13 @@ adminRouter.post('/customers/:id/credit', (req, res) => {
   if (!customer) return sendError(req, res, 404);
   const back = `/admin/customers/${customer.id}?tab=loyalty`;
   const amount = Math.round(Number(req.body.amount) || 0);
-  if (!amount) return res.redirect(withFlash(back, L.creditNeedsAmount));
+  if (!amount) return redirectWith(res, back, L.creditNeedsAmount);
   // A manual adjustment can never push the balance below zero.
   const applied = Math.max(amount, -customer.credit);
-  if (!applied) return res.redirect(`${withFlash(back, L.creditWouldGoNegative)}&tone=danger`);
+  if (!applied) return redirectWith(res, back, L.creditWouldGoNegative, 'danger');
   db.recordCredit(customer.id, applied, { reason: 'manual', detail: str(req.body.detail, 80), author: res.locals.actor });
   log(res, 'customer.credit', customer.phone, String(applied));
-  res.redirect(withFlash(back, L.saved));
+  redirectWith(res, back, L.saved);
 });
 
 adminRouter.post('/customers/:id/notes', (req, res) => {
@@ -784,12 +820,12 @@ adminRouter.post('/customers/:id/notes', (req, res) => {
     db.addNote(customer.id, body, res.locals.actor);
     log(res, 'customer.note', customer.phone);
   }
-  res.redirect(withFlash(`/admin/customers/${customer.id}?tab=notes`, res.locals.L.saved));
+  redirectWith(res, `/admin/customers/${customer.id}?tab=notes`, res.locals.L.saved);
 });
 
 adminRouter.post('/customers/:id/notes/:noteId/delete', (req, res) => {
   db.deleteNote(Number(req.params.noteId));
-  res.redirect(withFlash(`/admin/customers/${Number(req.params.id)}?tab=notes`, res.locals.L.saved));
+  redirectWith(res, `/admin/customers/${Number(req.params.id)}?tab=notes`, res.locals.L.saved);
 });
 
 adminRouter.post('/customers/:id/tags', (req, res) => {
@@ -798,7 +834,7 @@ adminRouter.post('/customers/:id/tags', (req, res) => {
   const tags = parseTags(req.body.tags).join(', ');
   db.updateCustomer(customer.id, { tags });
   log(res, 'customer.tags', customer.phone, tags);
-  res.redirect(withFlash(`/admin/customers/${customer.id}?tab=notes`, res.locals.L.saved));
+  redirectWith(res, `/admin/customers/${customer.id}?tab=notes`, res.locals.L.saved);
 });
 
 adminRouter.post('/customers/:id/block', (req, res) => {
@@ -807,7 +843,7 @@ adminRouter.post('/customers/:id/block', (req, res) => {
   const blocked = req.body.blocked === '1' ? 1 : 0;
   db.updateCustomer(customer.id, { blocked });
   log(res, blocked ? 'customer.block' : 'customer.unblock', customer.phone);
-  res.redirect(withFlash(`/admin/customers/${customer.id}`, blocked ? res.locals.L.blocked : res.locals.L.unblocked));
+  redirectWith(res, `/admin/customers/${customer.id}`, blocked ? res.locals.L.blocked : res.locals.L.unblocked);
 });
 
 // Media a customer sent (photo, voice note, document), looked up by message id only.
@@ -837,7 +873,7 @@ adminRouter.get('/loyalty', (req, res) => {
     referral: db.referralTotals(),
     referrers: db.topReferrers(20),
     rules: { every: shop.loyaltyEvery, reward: shop.loyaltyReward, referralReward: shop.referralReward },
-    flash: req.query.flash,
+    flash: takeFlash(req, res).message,
     theme: res.locals.theme,
     role: res.locals.role,
     waHealth: res.locals.waHealth,
@@ -852,7 +888,7 @@ adminRouter.get('/payments', (req, res) => {
   res.send(views.paymentsPage(L, locale, {
     orders: db.pendingPayments(),
     filter,
-    flash: req.query.flash,
+    flash: takeFlash(req, res).message,
     theme: res.locals.theme,
     role: res.locals.role,
     waHealth: tokenHealth(),
@@ -872,7 +908,7 @@ adminRouter.get('/expenses', (req, res) => {
     total: db.expenseTotal(from, to),
     revenue: db.periodStats(days).revenue,
     byCategory: db.expensesByCategory(from, to),
-    flash: req.query.flash,
+    flash: takeFlash(req, res).message,
     theme: res.locals.theme,
     role: res.locals.role,
     waHealth: res.locals.waHealth,
@@ -885,13 +921,13 @@ adminRouter.post('/expenses', (req, res) => {
   const amount = toInt(req.body.amount);
   db.createExpense({ day, category, label: str(req.body.label, 80), amount });
   log(res, 'expense.create', category, String(amount));
-  res.redirect(withFlash('/admin/expenses', res.locals.L.saved));
+  redirectWith(res, '/admin/expenses', res.locals.L.saved);
 });
 
 adminRouter.post('/expenses/:id/delete', (req, res) => {
   db.deleteExpense(Number(req.params.id));
   log(res, 'expense.delete', String(req.params.id));
-  res.redirect(withFlash('/admin/expenses', res.locals.L.saved));
+  redirectWith(res, '/admin/expenses', res.locals.L.saved);
 });
 
 /* ------------------------------- audit log ------------------------------ */
@@ -933,7 +969,7 @@ adminRouter.get('/broadcast', (req, res) => {
     lastResult: req.query.sent !== undefined
       ? { sent: Number(req.query.sent) || 0, skipped: Number(req.query.skipped) || 0, failed: Number(req.query.failed) || 0 }
       : null,
-    flash: req.query.flash,
+    flash: takeFlash(req, res).message,
     theme: res.locals.theme,
     role: res.locals.role,
     waHealth: res.locals.waHealth,
@@ -944,7 +980,7 @@ adminRouter.post('/broadcast', async (req, res) => {
   const { L } = res.locals;
   const body = str(req.body.body, 900);
   const group = audienceGroups(L).find((a) => a.key === req.body.audience);
-  if (!body || !group) return res.redirect(withFlash('/admin/broadcast', L.broadcastNeedsBody));
+  if (!body || !group) return redirectWith(res, '/admin/broadcast', L.broadcastNeedsBody);
 
   let sent = 0;
   let failed = 0;
@@ -996,8 +1032,8 @@ adminRouter.get('/settings', async (req, res) => {
     smtpReady: smtpConfigured(),
     tab,
     system: tab === 'system' ? systemInfo(await tokenHealth({ force: true })) : {},
-    flash: req.query.flash,
-    flashTone: req.query.tone === 'danger' ? 'danger' : '',
+    flash: takeFlash(req, res).message,
+    flashTone: takeFlash(req, res).tone,
     theme: res.locals.theme,
     role: res.locals.role,
     waHealth: res.locals.waHealth,
@@ -1071,7 +1107,7 @@ adminRouter.post('/settings', (req, res) => {
   settings.save(patch);
   resetTokenHealth();
   log(res, 'settings.save', tab);
-  res.redirect(withFlash(`/admin/settings?tab=${tab}`, res.locals.L.saved));
+  redirectWith(res, `/admin/settings?tab=${tab}`, res.locals.L.saved);
 });
 
 // A token pasted here wins over .env and survives deployments, which is what
@@ -1080,7 +1116,7 @@ adminRouter.post('/settings/wa-token', async (req, res) => {
   const { L } = res.locals;
   const back = '/admin/settings?tab=system';
   const pasted = str(req.body.token, 500);
-  if (!pasted) return res.redirect(`${withFlash(back, L.waTokenNeeded)}&tone=danger`);
+  if (!pasted) return redirectWith(res, back, L.waTokenNeeded, 'danger');
 
   // The console hands out a 24-hour token; Meta will trade it for one that
   // lasts about two months. Try, and fall back to what was pasted.
@@ -1092,28 +1128,28 @@ adminRouter.post('/settings/wa-token', async (req, res) => {
   if (!health.ok) {
     clearOverrideToken();
     resetTokenHealth();
-    return res.redirect(`${withFlash(back, `${L.waTokenRefused} ${health.message || ''}`.trim())}&tone=danger`);
+    return redirectWith(res, back, `${L.waTokenRefused} ${health.message || ''}`.trim(), 'danger');
   }
   log(res, 'settings.wa_token', `${tokenFingerprint()}${long ? ' (long-lived)' : ''}`);
   const until = long?.expiresAt ? long.expiresAt.toLocaleDateString(res.locals.locale === 'en' ? 'en-GB' : 'fr-FR') : null;
   const message = long
     ? (until ? L.waTokenExtendedUntil(until) : L.waTokenExtendedForever)
     : L.waTokenAccepted;
-  res.redirect(withFlash(back, message));
+  redirectWith(res, back, message);
 });
 
 adminRouter.post('/settings/wa-token/clear', (req, res) => {
   clearOverrideToken();
   resetTokenHealth();
   log(res, 'settings.wa_token', 'cleared');
-  res.redirect(withFlash('/admin/settings?tab=system', res.locals.L.saved));
+  redirectWith(res, '/admin/settings?tab=system', res.locals.L.saved);
 });
 
 adminRouter.post('/settings/test-email', async (req, res) => {
   const { L } = res.locals;
   const result = await sendTestEmail();
   const flash = result.ok ? L.testEmailSent(result.to) : `${L.testEmailFailed} ${result.error}`;
-  res.redirect(`${withFlash('/admin/settings?tab=alerts', flash)}${result.ok ? '' : '&tone=danger'}`);
+  redirectWith(res, '/admin/settings?tab=alerts', flash, result.ok ? '' : 'danger');
 });
 
 /** A copy of the database, consistent even while the bot is running. */
@@ -1144,7 +1180,7 @@ adminRouter.post('/push/subscribe', express.json({ limit: '4kb' }), (req, res) =
 adminRouter.post('/push/test', async (req, res) => {
   const { L } = res.locals;
   const sent = await push({ title: settings.get().name, body: L.pushTestBody, url: '/admin' });
-  res.redirect(withFlash('/admin/settings?tab=alerts', L.pushTestSent(sent)));
+  redirectWith(res, '/admin/settings?tab=alerts', L.pushTestSent(sent));
 });
 
 /* -------------------------------- staff --------------------------------- */
@@ -1154,8 +1190,8 @@ adminRouter.get('/staff', (req, res) => {
   res.send(views.staffPage(L, locale, {
     rows: staff.list(),
     owner: config.admin.user,
-    flash: req.query.flash,
-    flashTone: req.query.tone === 'danger' ? 'danger' : '',
+    flash: takeFlash(req, res).message,
+    flashTone: takeFlash(req, res).tone,
     theme: res.locals.theme,
     role: res.locals.role,
     waHealth: res.locals.waHealth,
@@ -1166,13 +1202,13 @@ adminRouter.post('/staff', (req, res) => {
   const { L } = res.locals;
   const username = staff.normalizeUsername(req.body.username);
   const password = String(req.body.password || '');
-  if (!username || password.length < 8) return res.redirect(`${withFlash('/admin/staff', L.staffNeedsPassword)}&tone=danger`);
+  if (!username || password.length < 8) return redirectWith(res, '/admin/staff', L.staffNeedsPassword, 'danger');
   if (staff.byUsername(username) || username === config.admin.user) {
-    return res.redirect(`${withFlash('/admin/staff', L.staffExists)}&tone=danger`);
+    return redirectWith(res, '/admin/staff', L.staffExists, 'danger');
   }
   staff.create({ username, name: req.body.name, role: req.body.role, password });
   log(res, 'staff.create', username, req.body.role);
-  res.redirect(withFlash('/admin/staff', L.saved));
+  redirectWith(res, '/admin/staff', L.saved);
 });
 
 adminRouter.post('/staff/:id', (req, res) => {
@@ -1180,7 +1216,7 @@ adminRouter.post('/staff/:id', (req, res) => {
   const account = staff.get(Number(req.params.id));
   if (!account) return sendError(req, res, 404);
   const password = String(req.body.password || '');
-  if (password && password.length < 8) return res.redirect(`${withFlash('/admin/staff', L.staffNeedsPassword)}&tone=danger`);
+  if (password && password.length < 8) return redirectWith(res, '/admin/staff', L.staffNeedsPassword, 'danger');
   staff.update(account.id, {
     name: req.body.name,
     role: req.body.role,
@@ -1188,7 +1224,7 @@ adminRouter.post('/staff/:id', (req, res) => {
     password: password || undefined,
   });
   log(res, 'staff.update', account.username);
-  res.redirect(withFlash('/admin/staff', L.saved));
+  redirectWith(res, '/admin/staff', L.saved);
 });
 
 adminRouter.post('/staff/:id/delete', (req, res) => {
@@ -1196,7 +1232,7 @@ adminRouter.post('/staff/:id/delete', (req, res) => {
   if (!account) return sendError(req, res, 404);
   staff.remove(account.id);
   log(res, 'staff.delete', account.username);
-  res.redirect(withFlash('/admin/staff', res.locals.L.saved));
+  redirectWith(res, '/admin/staff', res.locals.L.saved);
 });
 
 /* ---------------------------- delivery slots ----------------------------- */
@@ -1219,7 +1255,7 @@ adminRouter.get('/slots', (req, res) => {
     slots: db.listSlots(),
     load: db.slotLoad(day),
     day,
-    flash: req.query.flash,
+    flash: takeFlash(req, res).message,
     theme: res.locals.theme,
     role: res.locals.role,
     waHealth: res.locals.waHealth,
@@ -1232,19 +1268,19 @@ adminRouter.post('/slots', (req, res) => {
   const sortOrder = db.listSlots().reduce((max, s) => Math.max(max, s.sort_order), 0) + 1;
   db.createSlot({ ...fields, active: 1, sort_order: sortOrder });
   log(res, 'slot.create', fields.label_fr);
-  res.redirect(withFlash('/admin/slots', res.locals.L.saved));
+  redirectWith(res, '/admin/slots', res.locals.L.saved);
 });
 
 adminRouter.post('/slots/:id', (req, res) => {
   db.updateSlot(Number(req.params.id), slotFields(req.body));
   log(res, 'slot.update', String(req.params.id));
-  res.redirect(withFlash('/admin/slots', res.locals.L.saved));
+  redirectWith(res, '/admin/slots', res.locals.L.saved);
 });
 
 adminRouter.post('/slots/:id/delete', (req, res) => {
   db.deleteSlot(Number(req.params.id));
   log(res, 'slot.delete', String(req.params.id));
-  res.redirect(withFlash('/admin/slots', res.locals.L.saved));
+  redirectWith(res, '/admin/slots', res.locals.L.saved);
 });
 
 /* ---------------------- one product: variants & extras ------------------- */
@@ -1257,7 +1293,7 @@ adminRouter.get('/products/:id/edit', (req, res) => {
     product,
     variants: db.listVariants(product.id, { onlyActive: false }),
     extras: db.listExtras(product.id, { onlyActive: false }),
-    flash: req.query.flash,
+    flash: takeFlash(req, res).message,
     theme: res.locals.theme,
     role: res.locals.role,
     waHealth: res.locals.waHealth,
@@ -1279,17 +1315,17 @@ adminRouter.post('/products/:id/variants', (req, res) => {
   const sku = str(req.body.sku, 24).toLowerCase().replace(/[^a-z0-9_-]/g, '');
   const fields = variantFields(req.body);
   if (!sku || !fields.label_fr || !fields.label_en) return res.status(400).send('Missing fields');
-  if (db.getVariant(product.id, sku)) return res.redirect(withFlash(`/admin/products/${product.id}/edit`, res.locals.L.variantExists));
+  if (db.getVariant(product.id, sku)) return redirectWith(res, `/admin/products/${product.id}/edit`, res.locals.L.variantExists);
   const sortOrder = db.listVariants(product.id, { onlyActive: false }).reduce((m, v) => Math.max(m, v.sort_order), 0) + 1;
   db.createVariant({ product_id: product.id, sku, ...fields, active: 1, sort_order: sortOrder });
   log(res, 'variant.create', `${product.name_fr}/${sku}`);
-  res.redirect(withFlash(`/admin/products/${product.id}/edit`, res.locals.L.saved));
+  redirectWith(res, `/admin/products/${product.id}/edit`, res.locals.L.saved);
 });
 
 adminRouter.post('/variants/:id', (req, res) => {
   const variant = db.updateVariant(Number(req.params.id), variantFields(req.body));
   log(res, 'variant.update', String(req.params.id));
-  res.redirect(withFlash(`/admin/products/${variant?.product_id || ''}/edit`, res.locals.L.saved));
+  redirectWith(res, `/admin/products/${variant?.product_id || ''}/edit`, res.locals.L.saved);
 });
 
 adminRouter.post('/variants/:id/delete', (req, res) => {
@@ -1299,7 +1335,7 @@ adminRouter.post('/variants/:id/delete', (req, res) => {
     .find((v) => v.id === Number(req.params.id));
   db.deleteVariant(Number(req.params.id));
   log(res, 'variant.delete', String(req.params.id));
-  res.redirect(withFlash(`/admin/products/${variant?.product_id || ''}/edit`, res.locals.L.saved));
+  redirectWith(res, `/admin/products/${variant?.product_id || ''}/edit`, res.locals.L.saved);
 });
 
 const extraFields = (b) => ({
@@ -1317,20 +1353,20 @@ adminRouter.post('/products/:id/extras', (req, res) => {
   if (!fields.label_fr || !fields.label_en) return res.status(400).send('Missing fields');
   db.createExtra({ ...fields, product_id: req.body.global === '1' ? null : product.id, active: 1 });
   log(res, 'extra.create', fields.label_fr);
-  res.redirect(withFlash(`/admin/products/${product.id}/edit`, res.locals.L.saved));
+  redirectWith(res, `/admin/products/${product.id}/edit`, res.locals.L.saved);
 });
 
 adminRouter.post('/extras/:id', (req, res) => {
   const extra = db.updateExtra(Number(req.params.id), extraFields(req.body));
   log(res, 'extra.update', String(req.params.id));
-  res.redirect(withFlash(`/admin/products/${extra?.product_id || ''}/edit`, res.locals.L.saved));
+  redirectWith(res, `/admin/products/${extra?.product_id || ''}/edit`, res.locals.L.saved);
 });
 
 adminRouter.post('/extras/:id/delete', (req, res) => {
   const extra = db.allExtras().find((e) => e.id === Number(req.params.id));
   db.deleteExtra(Number(req.params.id));
   log(res, 'extra.delete', String(req.params.id));
-  res.redirect(withFlash(`/admin/products/${extra?.product_id || ''}/edit`, res.locals.L.saved));
+  redirectWith(res, `/admin/products/${extra?.product_id || ''}/edit`, res.locals.L.saved);
 });
 
 adminRouter.post('/products/:id/retailer', (req, res) => {
@@ -1338,7 +1374,7 @@ adminRouter.post('/products/:id/retailer', (req, res) => {
   if (!product) return sendError(req, res, 404);
   db.updateProduct(product.id, { retailer_id: str(req.body.retailer_id, 60) || null });
   log(res, 'product.retailer', product.name_fr);
-  res.redirect(withFlash(`/admin/products/${product.id}/edit`, res.locals.L.saved));
+  redirectWith(res, `/admin/products/${product.id}/edit`, res.locals.L.saved);
 });
 
 /* ---------------------------- product photos ----------------------------- */
@@ -1355,11 +1391,11 @@ const upload = multer({
 adminRouter.post('/products/:id/photo', upload.single('photo'), (req, res) => {
   const product = db.getProduct(Number(req.params.id));
   if (!product) return sendError(req, res, 404);
-  if (!req.file) return res.redirect(`${withFlash(`/admin/products/${product.id}/edit`, res.locals.L.photoRejected)}&tone=danger`);
+  if (!req.file) return redirectWith(res, `/admin/products/${product.id}/edit`, res.locals.L.photoRejected, 'danger');
   if (product.photo) deleteMedia('products', product.photo);
   db.updateProduct(product.id, { photo: req.file.filename });
   log(res, 'product.photo', product.name_fr);
-  res.redirect(withFlash(`/admin/products/${product.id}/edit`, res.locals.L.saved));
+  redirectWith(res, `/admin/products/${product.id}/edit`, res.locals.L.saved);
 });
 
 adminRouter.post('/products/:id/photo/delete', (req, res) => {
@@ -1368,7 +1404,7 @@ adminRouter.post('/products/:id/photo/delete', (req, res) => {
   if (product.photo) deleteMedia('products', product.photo);
   db.updateProduct(product.id, { photo: null });
   log(res, 'product.photo.delete', product.name_fr);
-  res.redirect(withFlash(`/admin/products/${product.id}/edit`, res.locals.L.saved));
+  redirectWith(res, `/admin/products/${product.id}/edit`, res.locals.L.saved);
 });
 
 /* ----------------------------- subscriptions ----------------------------- */
@@ -1377,7 +1413,7 @@ adminRouter.get('/subscriptions', (req, res) => {
   const { L, locale } = res.locals;
   res.send(views.subscriptionsPage(L, locale, {
     rows: db.listSubscriptions(),
-    flash: req.query.flash,
+    flash: takeFlash(req, res).message,
     theme: res.locals.theme,
     role: res.locals.role,
     waHealth: res.locals.waHealth,
@@ -1387,13 +1423,13 @@ adminRouter.get('/subscriptions', (req, res) => {
 adminRouter.post('/subscriptions/:id/toggle', (req, res) => {
   db.updateSubscription(Number(req.params.id), { active: req.body.active === '1' ? 1 : 0 });
   log(res, 'subscription.toggle', String(req.params.id));
-  res.redirect(withFlash('/admin/subscriptions', res.locals.L.saved));
+  redirectWith(res, '/admin/subscriptions', res.locals.L.saved);
 });
 
 adminRouter.post('/subscriptions/:id/delete', (req, res) => {
   db.deleteSubscription(Number(req.params.id));
   log(res, 'subscription.delete', String(req.params.id));
-  res.redirect(withFlash('/admin/subscriptions', res.locals.L.saved));
+  redirectWith(res, '/admin/subscriptions', res.locals.L.saved);
 });
 
 /* ------------------------------- accounting ------------------------------ */

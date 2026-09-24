@@ -22,6 +22,13 @@ const { customer, optionIds } = await import('./helpers.js');
 const { trackingToken } = await import('../src/tracking.js');
 const cart = await import('../src/bot/cart.js');
 
+/** The one-shot message a redirect leaves in its cookie, now that URLs stay clean. */
+const flashOf = (res) =>
+  decodeURIComponent(
+    (res.headers.getSetCookie?.() || []).find((c) => c.startsWith('admin_flash=')) || '',
+  );
+
+
 let server;
 let base;
 before(async () => {
@@ -269,7 +276,7 @@ test('passwords are hashed, and each role reaches only its own pages', async () 
 
   // A short password is refused.
   const short = await post('/admin/staff', 'username=court&password=123');
-  assert.match(decodeURIComponent(short.headers.get('location')), /8 caractères/);
+  assert.match(flashOf(short), /8 caractères/);
 
   const seller = `Basic ${Buffer.from('vendeur:motdepasse1').toString('base64')}`;
   const rider = `Basic ${Buffer.from('livreur:motdepasse2').toString('base64')}`;
@@ -556,7 +563,7 @@ test('a token Meta refuses is not kept', async () => {
     body: 'token=',
   });
   assert.equal(res.status, 302);
-  assert.match(decodeURIComponent(res.headers.get('location')), /Collez un jeton/);
+  assert.match(flashOf(res), /Collez un jeton/);
 
   const db = await import('../src/db/index.js');
   assert.ok(!db.getSetting('wa_token_override'), 'nothing was stored');

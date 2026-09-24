@@ -46,6 +46,29 @@ const mapsLink = (order) => {
   return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(query)}`;
 };
 
+const FLASH_COOKIE = 'route_flash';
+
+/** Same one-shot confirmation as the dashboard: in a cookie, never in the URL. */
+function setFlash(res, message) {
+  res.cookie(FLASH_COOKIE, String(message).slice(0, 300), {
+    httpOnly: true, sameSite: 'lax', secure: !!res.req?.secure, path: '/route',
+  });
+}
+
+function takeFlash(req, res) {
+  const raw = String(req.get('cookie') || '')
+    .split(';')
+    .map((c) => c.trim().split('='))
+    .find(([k]) => k === FLASH_COOKIE)?.[1];
+  if (!raw) return '';
+  res.clearCookie(FLASH_COOKIE, { path: '/route' });
+  try {
+    return decodeURIComponent(raw).slice(0, 300);
+  } catch {
+    return '';
+  }
+}
+
 export function riderCards(L, orders, { actionBase, numbered = false } = {}) {
   const locale = L.lang;
   return orders
@@ -163,7 +186,7 @@ routeRouter.get('/:day/:token', async (req, res, next) => {
   const { day, token } = req.params;
   if (!validLink(day, token)) return res.status(404).send(esc(L.route.expired));
   try {
-    res.send(await riderPage(L, day, `/route/${day}/${token}`, req.query.flash));
+    res.send(await riderPage(L, day, `/route/${day}/${token}`, takeFlash(req, res)));
   } catch (err) {
     next(err);
   }
@@ -201,7 +224,8 @@ routeRouter.post('/:day/:token/orders/:id', async (req, res) => {
   }
   try {
     const result = await changeOrderStatus(order.id, status);
-    res.redirect(`/route/${day}/${token}?flash=${encodeURIComponent(`${order.customer_name} : ${L.notified[result.notified] || L.saved}`)}`);
+    setFlash(res, `${order.customer_name} : ${L.notified[result.notified] || L.saved}`);
+    res.redirect(`/route/${day}/${token}`);
   } catch (err) {
     logger.error('Rider status change failed:', err.message);
     res.status(500).send('Error');

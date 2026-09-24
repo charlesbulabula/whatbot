@@ -15,6 +15,13 @@ const settings = await import('../src/shop/settings.js');
 const { handleInbound } = await import('../src/bot/engine.js');
 const { invoiceToken } = await import('../src/admin/router.js');
 
+/** The one-shot message a redirect leaves in its cookie, now that URLs stay clean. */
+const flashOf = (res) =>
+  decodeURIComponent(
+    (res.headers.getSetCookie?.() || []).find((c) => c.startsWith('admin_flash=')) || '',
+  );
+
+
 let server;
 let base;
 before(async () => {
@@ -114,10 +121,10 @@ test('credit can be granted and taken back, is explained, and never goes negativ
   // Taking more than the balance is refused rather than going negative.
   const tooMuch = await post(`/admin/customers/${customer.id}/credit`, 'amount=-5000');
   assert.equal(db.getCustomerById(customer.id).credit, 0, 'the balance stops at zero');
-  assert.match(decodeURIComponent(tooMuch.headers.get('location')), /négatif|Enregistré/);
+  assert.match(flashOf(tooMuch), /négatif|Enregistré/);
 
   const refused = await post(`/admin/customers/${customer.id}/credit`, 'amount=-100');
-  assert.match(decodeURIComponent(refused.headers.get('location')), /ne peut pas devenir négatif/);
+  assert.match(flashOf(refused), /ne peut pas devenir négatif/);
 
   const page = await (await get(`/admin/customers/${customer.id}?tab=loyalty`)).text();
   assert.match(page, /Ajustement manuel/);

@@ -12,6 +12,13 @@ const { app } = await import('../src/index.js');
 const db = await import('../src/db/index.js');
 const settings = await import('../src/shop/settings.js');
 
+/** The one-shot message a redirect leaves in its cookie, now that URLs stay clean. */
+const flashOf = (res) =>
+  decodeURIComponent(
+    (res.headers.getSetCookie?.() || []).find((c) => c.startsWith('admin_flash=')) || '',
+  );
+
+
 let server;
 let base;
 before(async () => {
@@ -107,7 +114,7 @@ test('admin can take over a conversation, reply inside the 24h window, and hand 
   assert.match(dash, /badge badge--danger">1</); // the handoff count badge
 
   const reply = await post(`/admin/customers/${customer.id}/reply`, 'body=' + encodeURIComponent('Oui, nous livrons à Masina 🙂'));
-  assert.match(decodeURIComponent(reply.headers.get('location')), /Message envoyé/);
+  assert.match(flashOf(reply), /Message envoyé/);
   assert.ok(db.messagesFor(phone).some((m) => m.direction === 'out' && m.body === 'Oui, nous livrons à Masina 🙂'));
 
   const page = await (await fetch(`${base}/admin/customers/${customer.id}?tab=chat`, { headers: { authorization: auth } })).text();
