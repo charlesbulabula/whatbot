@@ -31,17 +31,33 @@ vous ne coupez rien tant que vous ne changez pas `WA_PHONE_NUMBER_ID`.
 
 ## 1. Le portefeuille d'entreprise
 
-1. Ouvrez [business.facebook.com](https://business.facebook.com) et créez (ou
-   ouvrez) le portefeuille d'entreprise.
-2. *Paramètres d'entreprise → Informations sur l'entreprise* : nom légal exact,
-   adresse, téléphone, site web (`https://ll-aca.site`).
-   Ces informations doivent correspondre **mot pour mot** aux documents.
-3. *Paramètres d'entreprise → Centre de sécurité → Vérification de l'entreprise*
-   → lancer la vérification et téléverser les documents.
+Il existe déjà : **megamatgroup**, identifiant `804383151763933`. L'application
+`whatbot` y est bien rattachée — vérifié auprès de Meta via le serveur MCP.
+
+Une seule chose y manque, et elle bloque tout le reste : **le profil de
+l'entreprise est incomplet**. WhatsApp contrôle ce profil avant d'autoriser le
+moindre envoi ; tant qu'il l'est, un numéro ajouté maintenant resterait en
+attente sans jamais pouvoir écrire. Ça ne demande aucun document :
+
+→ <https://business.facebook.com/settings/info/?business_id=804383151763933>
+
+Renseignez le nom légal exact, l'adresse, le téléphone et le site web
+(`https://ll-aca.site`). Ces informations doivent correspondre **mot pour mot**
+à celles des documents téléversés ensuite.
+
+Puis *Paramètres d'entreprise → Centre de sécurité → Vérification de
+l'entreprise* → lancer la vérification et téléverser les documents.
 
 > **Pourquoi c'est indispensable.** Sans vérification, le compte reste bloqué à
 > un nombre réduit de contacts et certains modèles de message sont refusés. La
 > réponse de Meta prend en général de quelques heures à quelques jours.
+
+> **Vérifiez toujours dans quel portefeuille vous êtes.** Vous en administrez
+> neuf, dont un nommé « Whatbot » (`39227276943530030`) qui est entièrement
+> vide. C'est en travaillant depuis celui-là qu'apparaît « Cette application ne
+> vous appartient pas » : l'app est sur megamatgroup, pas ailleurs. Le nom
+> affiché en haut à gauche de Business Settings est ce qu'il faut regarder
+> avant d'agir.
 
 ---
 
@@ -54,9 +70,9 @@ production, sur [developers.facebook.com](https://developers.facebook.com) :
    - **URL de la politique de confidentialité** : `https://bot.ll-aca.site/privacy`
    - **URL des conditions d'utilisation** : `https://bot.ll-aca.site/terms`
    - catégorie, icône, e-mail de contact.
-2. Vérifiez que l'app appartient bien au portefeuille d'entreprise de l'étape 1
-   (*Paramètres → De base → Compte professionnel*).
-3. Passez l'application en **mode Live** (interrupteur en haut de la page).
+2. Le rattachement au portefeuille et le passage en **mode Live** sont **déjà
+   faits** (*Paramètres → De base → Compte professionnel* affiche megamatgroup).
+   Rien à toucher ici.
 
 ---
 
@@ -92,6 +108,18 @@ C'est ce qui remplace le jeton de 24 h qui expire aujourd'hui.
      `whatsapp_business_management`.
 4. Copiez-le immédiatement (il n'est affiché qu'une fois) et mettez-le dans le
    secret GitHub `WA_TOKEN`.
+
+Lien direct vers la page, pour megamatgroup :
+<https://business.facebook.com/latest/settings/system_users/?business_id=804383151763933>
+
+> **Personne ne peut le générer à votre place**, pas même le serveur MCP de
+> Meta : la génération est une action sécurisée qui doit se faire dans la page.
+> Le MCP ne sait qu'ouvrir la bonne page. Ce portefeuille a déjà un utilisateur
+> système, il n'y a donc qu'à générer le jeton dessus.
+
+> **Ce n'est pas urgent.** Le jeton actuel a été échangé contre un jeton longue
+> durée : il est valide **jusqu'au 23/11/2026**. Le jeton permanent ne devient
+> nécessaire que pour le vrai numéro.
 
 ---
 
@@ -177,14 +205,26 @@ système**.
 
 Il n'est pas dans l'annuaire de connecteurs de Claude : ajoutez-le comme
 **connecteur personnalisé** avec cette URL, puis connectez-vous à Meta.
+C'est fait : le connecteur est actif.
 
-L'intérêt : la portée `business_management` est précisément celle qui manque au
-jeton de la console, et c'est elle qui empêche aujourd'hui de lire le
-portefeuille ou d'y créer un utilisateur système.
+Ses prérequis : rôle **admin** sur le portefeuille, et rôle admin sur une app
+**rattachée à ce portefeuille**. Il ne remplace rien dans le bot — c'est un
+outil de configuration, pas un composant d'exécution.
 
-Ses prérequis restent les mêmes : rôle **admin** sur le portefeuille, et rôle
-admin sur une app **rattachée à ce portefeuille**. Il ne remplace rien dans le
-bot — c'est un outil de configuration, pas un composant d'exécution.
+**Ce qu'il sait faire.** Lister les portefeuilles et les comptes, dire
+exactement où en est l'installation d'un portefeuille (profil, app, numéro,
+webhook, abonnement, publication, paiement), ajouter et vérifier un numéro,
+gérer les modèles de message, configurer le webhook, lancer la vérification
+d'entreprise.
+
+**Ce qu'il ne sait pas faire**, et qu'il faut donc faire à la main :
+
+- **générer le jeton d'utilisateur système** — action sécurisée en page ;
+- **gérer la liste blanche du numéro de test** — elle n'existe que dans la page
+  *WhatsApp → API Setup* du tableau de bord de l'app ; c'est là qu'il faut
+  ajouter `+33764534909` pour recevoir les messages du bot ;
+- **envoyer depuis le numéro de test** — les numéros de test sont exclus de
+  toutes ses listes.
 
 ## Rester sur le numéro de test
 
