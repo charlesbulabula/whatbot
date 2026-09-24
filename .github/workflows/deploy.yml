@@ -76,6 +76,7 @@ jobs:
           # Settings written into /opt/whatbot/.env (empty ones are left untouched).
           WHATBOT_ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
           WHATBOT_WA_VERIFY_TOKEN: ${{ secrets.WA_VERIFY_TOKEN }}
+          WHATBOT_WA_APP_ID: ${{ vars.WA_APP_ID || '1803892427276261' }}
           WHATBOT_WA_PHONE_NUMBER_ID: ${{ secrets.WA_PHONE_NUMBER_ID }}
           WHATBOT_WA_TOKEN: ${{ secrets.WA_TOKEN }}
           WHATBOT_WA_APP_SECRET: ${{ secrets.WA_APP_SECRET }}

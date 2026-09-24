@@ -662,6 +662,10 @@ const fr = {
   waTokenFromDashboard: 'Collé dans le tableau de bord',
   waTokenFromEnv: 'Fichier .env du serveur',
 
+  waTokenExtendedUntil: (date) => `Jeton accepté et prolongé par Meta jusqu’au ${date}. Le bot peut de nouveau répondre.`,
+  waTokenExtendedForever: 'Jeton accepté et prolongé par Meta sans date d’expiration. Le bot peut de nouveau répondre.',
+  waTokenExchangeNote: 'Le jeton collé est automatiquement échangé auprès de Meta contre un jeton longue durée (environ 60 jours) : vous n’aurez pas à le refaire demain.',
+
 };
 
 const en = {
@@ -1324,6 +1328,10 @@ const en = {
   waTokenSource: 'Token source',
   waTokenFromDashboard: 'Pasted in the dashboard',
   waTokenFromEnv: 'Server .env file',
+
+  waTokenExtendedUntil: (date) => `Token accepted and extended by Meta until ${date}. The bot can answer again.`,
+  waTokenExtendedForever: 'Token accepted and extended by Meta with no expiry. The bot can answer again.',
+  waTokenExchangeNote: 'The token you paste is automatically traded with Meta for a long-lived one (about 60 days), so you will not have to do this again tomorrow.',
 
 };
 

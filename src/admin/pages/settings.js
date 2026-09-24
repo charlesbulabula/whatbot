@@ -40,6 +40,7 @@ const form = (L, tab, inner) => `<form method="post" action="/admin/settings">
 function tokenCard(L, shop, system) {
   const fromDashboard = system.waHealth?.source === 'dashboard';
   return card(`<p class="form-note" style="margin-top:0">${esc(L.waTokenHint)}</p>
+${alert(esc(L.waTokenExchangeNote), '', 'info')}
 <form method="post" action="/admin/settings/wa-token">
 <div class="field"><label for="wa-token">${esc(L.waTokenPaste)}</label>
 <input id="wa-token" name="token" type="password" autocomplete="off" required minlength="40"

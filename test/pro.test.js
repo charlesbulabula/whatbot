@@ -561,3 +561,21 @@ test('a token Meta refuses is not kept', async () => {
   const db = await import('../src/db/index.js');
   assert.ok(!db.getSetting('wa_token_override'), 'nothing was stored');
 });
+
+test('a pasted token is traded for a long-lived one when Meta allows it', async () => {
+  const { exchangeForLongLived } = await import('../src/whatsapp/token.js');
+  const { config } = await import('../src/config.js');
+
+  // Without an app id there is nothing to exchange against, and the caller
+  // must still be able to use the token that was pasted.
+  const before = config.appId;
+  config.appId = '';
+  assert.equal(await exchangeForLongLived('EAAwhatever'), null);
+
+  // With an app id but an unusable token, Meta declines and we return null
+  // rather than throwing: the pasted token is then used as-is.
+  config.appId = '1234567890';
+  const declined = await exchangeForLongLived('clearly-not-a-token');
+  assert.equal(declined, null);
+  config.appId = before;
+});

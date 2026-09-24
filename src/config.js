@@ -11,6 +11,8 @@ const list = (v, fallback = []) =>
 
 export const config = {
   env: process.env.NODE_ENV || 'development',
+  // Meta app id: needed to exchange a short-lived token for a long-lived one.
+  appId: process.env.WA_APP_ID || '',
   port: int(process.env.PORT, 3000),
   host: process.env.HOST || '127.0.0.1',
   publicUrl: (process.env.PUBLIC_URL || '').replace(/\/$/, ''),

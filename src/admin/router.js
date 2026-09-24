@@ -15,7 +15,9 @@ import * as settings from '../shop/settings.js';
 import { COUPON_KINDS, normalizeCode } from '../shop/coupons.js';
 import { smtpConfigured, sendTestEmail } from '../mail.js';
 import { tokenHealth, resetTokenHealth } from '../whatsapp/health.js';
-import { setOverrideToken, clearOverrideToken, tokenFingerprint } from '../whatsapp/token.js';
+import {
+  setOverrideToken, clearOverrideToken, tokenFingerprint, exchangeForLongLived,
+} from '../whatsapp/token.js';
 import * as staff from '../shop/staff.js';
 import { vapid, push } from '../pwa.js';
 import * as waCatalog from '../shop/wa-catalog.js';
@@ -1008,16 +1010,27 @@ adminRouter.post('/settings', (req, res) => {
 adminRouter.post('/settings/wa-token', async (req, res) => {
   const { L } = res.locals;
   const back = '/admin/settings?tab=system';
-  if (!setOverrideToken(req.body.token)) {
-    return res.redirect(`${withFlash(back, L.waTokenNeeded)}&tone=danger`);
-  }
+  const pasted = str(req.body.token, 500);
+  if (!pasted) return res.redirect(`${withFlash(back, L.waTokenNeeded)}&tone=danger`);
+
+  // The console hands out a 24-hour token; Meta will trade it for one that
+  // lasts about two months. Try, and fall back to what was pasted.
+  const long = await exchangeForLongLived(pasted);
+  setOverrideToken(long?.token || pasted);
   resetTokenHealth();
+
   const health = await tokenHealth({ force: true });
-  log(res, 'settings.wa_token', tokenFingerprint());
-  if (health.ok) return res.redirect(withFlash(back, L.waTokenAccepted));
-  clearOverrideToken();
-  resetTokenHealth();
-  res.redirect(`${withFlash(back, `${L.waTokenRefused} ${health.message || ''}`.trim())}&tone=danger`);
+  if (!health.ok) {
+    clearOverrideToken();
+    resetTokenHealth();
+    return res.redirect(`${withFlash(back, `${L.waTokenRefused} ${health.message || ''}`.trim())}&tone=danger`);
+  }
+  log(res, 'settings.wa_token', `${tokenFingerprint()}${long ? ' (long-lived)' : ''}`);
+  const until = long?.expiresAt ? long.expiresAt.toLocaleDateString(res.locals.locale === 'en' ? 'en-GB' : 'fr-FR') : null;
+  const message = long
+    ? (until ? L.waTokenExtendedUntil(until) : L.waTokenExtendedForever)
+    : L.waTokenAccepted;
+  res.redirect(withFlash(back, message));
 });
 
 adminRouter.post('/settings/wa-token/clear', (req, res) => {
