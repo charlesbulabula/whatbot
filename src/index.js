@@ -3,6 +3,7 @@ import express from 'express';
 import { config, assertConfig } from './config.js';
 import * as settings from './shop/settings.js';
 import { logger } from './utils/logger.js';
+import { notFoundHandler, errorHandler } from './errors.js';
 import { seedIfEmpty } from './db/seed.js';
 import { db, ping, seedZonesIfEmpty, seedVariantsIfMissing } from './db/index.js';
 import { webhookRouter } from './whatsapp/webhook.js';
@@ -70,10 +71,8 @@ app.use(pwaRouter); // /manifest.webmanifest, /sw.js, /icon.svg
 app.use(legalRouter);
 app.get('/', (_req, res) => res.redirect('/admin'));
 
-app.use((err, _req, res, _next) => {
-  logger.error('Unhandled error:', err.stack || err.message);
-  res.status(err.status || 500).send('Internal error');
-});
+app.use(notFoundHandler);
+app.use(errorHandler);
 
 // Only listen when run directly (`node src/index.js`), not when imported by tests.
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

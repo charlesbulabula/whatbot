@@ -465,6 +465,13 @@ dialog.confirm[data-tone=danger] .confirm__ok:hover{filter:brightness(.92)}
   @keyframes confirm-in{from{opacity:0;transform:translateY(-6px) scale(.98)}to{opacity:1;transform:none}}
 }
 @media print{dialog.confirm{display:none!important}}
+.errpage{min-height:100vh;display:grid;place-content:center;justify-items:center;text-align:center;
+  gap:.5rem;padding:2rem 1.25rem;background:var(--hk-bg-secondary);color:var(--hk-text-primary)}
+.errpage__code{font-size:.8125rem;font-weight:700;letter-spacing:.14em;color:var(--hk-text-tertiary)}
+.errpage__icon{width:60px;height:60px;border-radius:var(--radius-xl);display:grid;place-items:center;
+  background:var(--soft-gray);color:var(--on-soft-gray);margin:.25rem 0 .5rem}
+.errpage h1{font-size:1.375rem;margin:0}
+.errpage p{margin:0 0 1rem;color:var(--hk-text-secondary);max-width:26rem}
 `;
 
 /* -------------------------------- icons --------------------------------- */

@@ -251,6 +251,32 @@ test('a greeting is answered, never scolded', () => {
   assert.equal(c.state(), 'PICK_SIZE');
 });
 
+test('free text at the menu is answered instead of refused', () => {
+  const c = customer('243810000032');
+  c.say('Bonjour');
+
+  // Questions get an answer, and the menu stays on screen.
+  assert.match(c.say('vous livrez a Gombe ?').last.body, /Gombe/);
+  assert.equal(c.state(), 'MENU');
+  assert.match(c.say('horaires').last.body, /ouverts|fermés/i);
+
+  // Buying words open the catalogue.
+  c.say('je veux commander');
+  assert.equal(c.state(), 'PICK_PRODUCT');
+
+  // A product named the way Kinshasa names it.
+  const d = customer('243810000033');
+  d.say('Bonjour');
+  d.say('pili pili');
+  assert.equal(d.state(), 'PICK_PRODUCT');
+
+  // Nonsense is still refused, rather than dumped into the catalogue.
+  const e = customer('243810000034');
+  e.say('Bonjour');
+  assert.match(e.say('zzzz qqqq').last.body, /Je n’ai pas compris/);
+  assert.equal(e.state(), 'MENU');
+});
+
 test('a shared location is accepted as the delivery address', () => {
   const c = customer('243810000011');
   c.say('Bonjour');

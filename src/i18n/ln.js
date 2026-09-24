@@ -174,6 +174,9 @@ export default {
   zoneFee: (p) => `Kokitisa ${p.amount}`,
   zoneFeeList: (p) => `Motuya ya kokitisa :\n${p.lines}`,
   zoneFeeFree: 'Kokitisa ya ofele',
+  deliveryAnswer: (p) => `Tokokitisaka na bakartier oyo 🛵\n${p.lines}`,
+  openNow: (p) => `Tofungwami ✅ Lelo banda *${p.open}* tii *${p.close}*.`,
+  openAlways: 'Tofungwami ✅',
 
   btnCoupon: '🎟️ Code promo',
   btnSkipCoupon: '← Zonga',

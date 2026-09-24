@@ -85,6 +85,8 @@ const MAX_QTY = 20;
 /* ------------------------------ keywords ------------------------------- */
 
 const words = (...list) => new Set(list);
+/** Referral codes look like EP3F9A21; shared by the greeting guard and applyReferral. */
+const REFERRAL_CODE = /\bEP[0-9A-F]{6}\b/i;
 const KEYWORDS = {
   cancel: words('annuler', 'annule', 'annulation', 'cancel'),
   menu: words('menu', 'accueil', 'home', 'start', 'restart', 'recommencer'),
@@ -105,9 +107,31 @@ const KEYWORDS = {
     'bonjour', 'bonsoir', 'bjr', 'salut', 'slt', 'coucou', 'cc',
     'hello', 'hi', 'hey', 'yo', 'good morning', 'good evening',
     'mbote', 'sango', 'losako',
+    'allo', 'alo', 'ola', 'svp', 'stp', 's il vous plait', 'please',
   ),
   thanks: words('merci', 'merci beaucoup', 'mercii', 'thanks', 'thank you', 'thx', 'matondo'),
 };
+
+/**
+ * Intents recognised in free text at the menu, where the customer has no
+ * running order to disturb. Deliberately NOT global: mid-order, "livraison"
+ * or "quartier" is far more likely to be part of an address than a question.
+ */
+const INTENTS = [
+  ['order', /(^|\s)(commander|commande|acheter|achat|je veux|je voudrais|j aimerais|panier)(\s|$)/],
+  ['prices', /(^|\s)(prix|tarif|tarifs|combien|cout|couts|coute|coutent|price|prices|how much)(\s|$)/],
+  ['catalogue', /(^|\s)(catalogue|produit|produits|liste|epice|epices|legume|legumes|stock|dispo|disponible|disponibles|products|catalog)(\s|$)/],
+  ['delivery', /(^|\s)(livraison|livrez|livrer|livre|zone|zones|quartier|quartiers|delivery|deliver)(\s|$)/],
+  ['hours', /(^|\s)(horaire|horaires|ouvert|ouverte|ouverts|ferme|fermes|fermee|heure|heures|open|hours|closed)(\s|$)/],
+  // Delivery-only shop: "where are you" is really "where do you deliver".
+  ['delivery', /(^|\s)(adresse|localisation|situes|situee|boutique|magasin|address|location|shop)(\s|$)|ou etes vous|ou est ce que vous etes|where are you/],
+];
+
+/** The intent a free-text message carries at the menu, or null. */
+function menuIntent(norm) {
+  for (const [name, rx] of INTENTS) if (rx.test(norm)) return name;
+  return null;
+}
 
 /** True for the words that act as commands at any step (menu, annuler, aide...). */
 export function isKeyword(norm) {
@@ -369,11 +393,21 @@ function handleKeyword(s, input) {
     greetAndMenu(s);
     return true;
   }
-  if (KEYWORDS.greeting.has(k)) {
-    // Mid-order, a hello should not throw the basket away: just ask again.
-    if (IDLE.has(s.state)) greetAndMenu(s);
-    else reprompt(s);
-    return true;
+  // A bare greeting, or one with a harmless word after it ("bonjour madame").
+  // Anything longer is a real message that opens with a polite hello --
+  // "bonjour, 2 tas de tomates", "bonjour EP3F9A21" -- and must fall through.
+  const head = k.split(' ')[0];
+  if (KEYWORDS.greeting.has(head) && !input.nlu && !REFERRAL_CODE.test(input.raw || '')) {
+    const rest = k.slice(head.length).trim();
+    const harmless =
+      rest.split(' ').filter(Boolean).length <= 2 && !/\d/.test(rest)
+      && !menuIntent(rest) && !pick(s, { ...input, norm: rest });
+    if (!rest || harmless) {
+      // Mid-order, a hello should not throw the basket away: just ask again.
+      if (IDLE.has(s.state)) greetAndMenu(s);
+      else reprompt(s);
+      return true;
+    }
   }
   if (KEYWORDS.thanks.has(k)) {
     say(s, tr(s, 'thanksReply'));
@@ -463,7 +497,7 @@ function applyReferral(s, raw) {
   const c = s.customer;
   const reward = settings.get().referralReward;
   if (reward <= 0 || c.referred_by || c.orders_count > 0) return null;
-  const code = String(raw || '').match(/\bEP[0-9A-F]{6}\b/i)?.[0];
+  const code = String(raw || '').match(REFERRAL_CODE)?.[0];
   if (!code) return null;
   const referrer = db.getCustomerByReferralCode(code);
   if (!referrer || referrer.id === c.id) return null;
@@ -485,6 +519,42 @@ function closedMessage(s) {
         ? tr(s, 'closedUntilTomorrow', { time: next.time })
         : tr(s, 'closedUntilDay', { day: tr(s, `weekdays.${next.day}`), time: next.time });
   return join(tr(s, 'shopClosed'), st.closedNote || null, when);
+}
+
+/** The product a typed name refers to, when exactly one matches. */
+const ALIASES = [
+  // What people in Kinshasa actually call these, next to the catalogue name.
+  [/pili ?pili|piri ?piri|pimo/, 'piment'],
+  [/tomate?s/, 'tomate'],
+  [/oignons?|ognon/, 'oignon'],
+  [/gingembres?|tangawisi/, 'gingembre'],
+  [/ails?|loso ya ail/, 'ail'],
+];
+
+function productByName(s, norm) {
+  if (!norm || norm.length < 3) return null;
+  const needle = ALIASES.find(([rx]) => rx.test(norm))?.[1] || norm;
+  const hits = db.listProducts().filter((p) => {
+    const name = normalize(productName(p, s.locale));
+    return name.length >= 3 && (name.includes(needle) || needle.includes(name));
+  });
+  return hits.length === 1 ? hits[0] : null;
+}
+
+/** "Where do you deliver?" -- the served areas with their own fees. */
+function deliveryAnswer(s) {
+  const lines = servedZones()
+    .map((z) => `• ${z.name} — ${z.fee > 0 ? fmt(s, z.fee) : tr(s, 'zoneFeeFree')}`)
+    .join('\n');
+  return tr(s, 'deliveryAnswer', { lines });
+}
+
+/** "Are you open?" -- today's window when open, the next opening when not. */
+function hoursAnswer(s) {
+  const st = settings.get();
+  if (!settings.isOpen(new Date(), st)) return closedMessage(s);
+  const today = st.hours?.[new Date().getDay()];
+  return today ? tr(s, 'openNow', { open: today.open, close: today.close }) : tr(s, 'openAlways');
 }
 
 function startOrder(s, { reorder = false, skipChecks = false } = {}) {
@@ -754,6 +824,13 @@ const HANDLERS = {
       if (input.nlu) return startUnderstoodOrder(s, input.nlu);
       const referral = applyReferral(s, input.raw);
       if (referral) return reprompt(s, referral);
+      // Free text at the menu: answer the question, or open the catalogue.
+      const intent = menuIntent(input.norm);
+      if (intent === 'delivery') return reprompt(s, deliveryAnswer(s));
+      if (intent === 'hours') return reprompt(s, hoursAnswer(s));
+      if (intent) return startOrder(s);
+      // A product typed by name ("gingembre") opens the catalogue on it.
+      if (productByName(s, input.norm)) return startOrder(s);
       reprompt(s, tr(s, 'invalidChoice'));
     },
   },

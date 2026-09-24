@@ -183,6 +183,9 @@ export default {
   zoneFee: (p) => `Livraison ${p.amount}`,
   zoneFeeList: (p) => `Frais de livraison :\n${p.lines}`,
   zoneFeeFree: 'Livraison offerte',
+  deliveryAnswer: (p) => `Nous livrons dans ces quartiers 🛵\n${p.lines}`,
+  openNow: (p) => `Nous sommes ouverts ✅ Aujourd’hui de *${p.open}* à *${p.close}*.`,
+  openAlways: 'Nous sommes ouverts ✅',
 
   /* --------------------------- coupons --------------------------------- */
   btnCoupon: '🎟️ Code promo',

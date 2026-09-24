@@ -179,6 +179,9 @@ export default {
   zoneFee: (p) => `Delivery ${p.amount}`,
   zoneFeeList: (p) => `Delivery fees:\n${p.lines}`,
   zoneFeeFree: 'Free delivery',
+  deliveryAnswer: (p) => `We deliver to these areas 🛵\n${p.lines}`,
+  openNow: (p) => `We are open ✅ Today from *${p.open}* to *${p.close}*.`,
+  openAlways: 'We are open ✅',
 
   /* --------------------------- coupons --------------------------------- */
   btnCoupon: '🎟️ Promo code',
