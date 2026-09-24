@@ -187,8 +187,14 @@ function replyBlock(L, { customer, canReply, human }) {
 <div class="actions"><button class="btn btn--primary">${icon('message', 17)} ${esc(L.send)}</button></div></form>`
     : alert(esc(L.windowClosed), 'warning', 'clock');
 
+  // The one thing that still reaches a customer once the 24h window has shut.
+  const nudge = `<form method="post" action="/admin/customers/${customer.id}/nudge"
+ data-confirm="${esc(L.nudgeConfirm)}">
+<button class="btn">${icon('gift', 17)} ${esc(L.nudge)}</button></form>
+<p class="form-note" style="flex-basis:100%;margin:.4rem 0 0">${esc(L.nudgeHint)}</p>`;
+
   return card(`${human ? alert(esc(L.botPaused), 'warning', 'hand') : ''}${reply}
-<hr><div class="actions">${human
+<hr><div class="actions" style="flex-wrap:wrap">${nudge}${human
     ? `<form method="post" action="/admin/customers/${customer.id}/release" class="inline"><button class="btn">${icon('bot', 17)} ${esc(L.release)}</button></form>`
     : `<form method="post" action="/admin/customers/${customer.id}/takeover" class="inline"><button class="btn">${icon('hand', 17)} ${esc(L.takeOver)}</button></form>`}</div>`);
 }

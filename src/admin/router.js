@@ -11,6 +11,7 @@ import { DEFAULT_LOCALE, normalizeLocale, t } from '../i18n/index.js';
 import { changeOrderStatus, ORDER_STATUSES, storeProof } from '../bot/orders.js';
 import { downloadMedia, send } from '../whatsapp/client.js';
 import { inServiceWindow } from '../bot/notify.js';
+import { winbackOne } from '../jobs/scheduler.js';
 import { text } from '../bot/messages.js';
 import * as settings from '../shop/settings.js';
 import { COUPON_KINDS, normalizeCode } from '../shop/coupons.js';
@@ -430,6 +431,55 @@ adminRouter.get('/orders/:id', (req, res) => {
   }));
 });
 
+/**
+ * Takes the same order again, for a customer who asks for "the usual" by phone.
+ * Prices are today's, not the old ones; anything no longer sold is dropped and
+ * named, because a silently shorter order is worse than none.
+ */
+adminRouter.post('/orders/:id/duplicate', (req, res) => {
+  const { L, locale } = res.locals;
+  const old = db.getOrder(Number(req.params.id));
+  if (!old) return sendError(req, res, 404);
+
+  const dropped = [];
+  const items = [];
+  for (const line of old.items) {
+    const product = db.getProduct(line.product_id);
+    const price = product && product.in_stock ? product[`price_${line.size}`] : null;
+    if (!price) {
+      dropped.push(locale === 'en' ? line.name_en : line.name_fr);
+      continue;
+    }
+    items.push({
+      productId: line.product_id,
+      size: line.size,
+      variantLabel: line.variant_label,
+      extras: line.extras ? JSON.parse(line.extras) : [],
+      quantity: line.quantity,
+      unitPrice: price,
+    });
+  }
+  if (!items.length) return redirectWith(res, `/admin/orders/${old.id}`, L.duplicateNothingLeft, 'danger');
+
+  const subtotal = items.reduce((sum, it) => sum + it.unitPrice * it.quantity, 0);
+  const deliveryFee = old.delivery_fee;
+  const order = db.createOrder({
+    customer: old.customer,
+    items,
+    subtotal,
+    deliveryFee,
+    discount: 0,
+    total: subtotal + deliveryFee,
+    paymentMethod: old.payment_method,
+    name: old.customer_name,
+    neighborhood: old.neighborhood,
+    addressNote: old.address_note,
+  });
+  log(res, 'order.duplicate', order.reference, old.reference);
+  const note = dropped.length ? `${L.duplicated} ${L.duplicateDropped(dropped.join(', '))}` : L.duplicated;
+  redirectWith(res, `/admin/orders/${order.id}`, note, dropped.length ? 'danger' : '');
+});
+
 adminRouter.post('/orders/:id/status', async (req, res) => {
   const { L } = res.locals;
   const status = String(req.body.status || '');
@@ -763,6 +813,27 @@ adminRouter.get('/customers/:id', (req, res) => {
   }));
 });
 
+/**
+ * Reaches a customer the 24h window has closed on. WhatsApp only allows an
+ * approved template there, so this is the one path that still works -- and it
+ * says plainly when no template is approved yet, instead of failing quietly.
+ */
+adminRouter.post('/customers/:id/nudge', async (req, res) => {
+  const { L } = res.locals;
+  const customer = db.getCustomerById(Number(req.params.id));
+  if (!customer) return sendError(req, res, 404);
+  const back = `/admin/customers/${customer.id}?tab=chat`;
+  try {
+    const result = await winbackOne(customer);
+    if (result === 'skipped') return redirectWith(res, back, L.nudgeNoTemplate, 'danger');
+    log(res, 'customer.nudge', customer.phone, result);
+    redirectWith(res, back, result === 'template' ? L.nudgeTemplateSent : L.nudgeSent);
+  } catch (err) {
+    logger.error('Admin nudge failed:', err.message);
+    redirectWith(res, back, `${L.messageFailed} : ${err.message}`, 'danger');
+  }
+});
+
 adminRouter.post('/customers/:id/reply', async (req, res) => {
   const { L } = res.locals;
   const customer = db.getCustomerById(Number(req.params.id));
@@ -959,11 +1030,28 @@ function audienceGroups(L) {
   const all = db.searchCustomersPaged({ limit: 5000 }).rows.filter((c) => !c.marketing_opt_out && !c.blocked);
   const open = all.filter((c) => inServiceWindow(c));
   const pick = (fn) => open.filter(fn);
+  const daysSince = (value) => (value ? (Date.now() - new Date(`${value}Z`).getTime()) / 864e5 : Infinity);
+  const away = (days) => pick((c) => c.orders_count > 0 && daysSince(c.last_order_at) >= days);
+  const zones = db.listZones({ onlyActive: false }).map((z) => z.name);
   return [
     { key: 'window', label: L.audienceWindow, hint: L.audienceWindowHint, list: open },
     { key: 'regulars', label: L.audienceRegulars, hint: L.audienceRegularsHint, list: pick((c) => c.orders_count >= 2) },
     { key: 'vip', label: L.audienceVip, hint: L.audienceVipHint, list: pick((c) => c.segment === 'vip') },
     { key: 'waitlist', label: L.audienceWaitlist, hint: L.audienceWaitlistHint, list: pick((c) => c.waitlist_since) },
+    // Away for a while: the people a reminder is actually for.
+    ...[30, 60, 90].map((days) => ({
+      key: `away${days}`,
+      label: L.audienceAway(days),
+      hint: L.audienceAwayHint(days),
+      list: away(days),
+    })),
+    // One per delivery area, so a round can be announced to the right street.
+    ...zones.map((zone) => ({
+      key: `zone:${zone}`,
+      label: L.audienceZone(zone),
+      hint: L.audienceZoneHint(zone),
+      list: pick((c) => (c.neighborhood || '').toLowerCase() === zone.toLowerCase()),
+    })),
   ].map((g) => ({ ...g, count: g.list.length }));
 }
 

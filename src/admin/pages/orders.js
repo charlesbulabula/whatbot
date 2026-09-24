@@ -113,7 +113,9 @@ export function orderPage(L, locale, { order, messages, timeline, flash, theme ,
 <a class="btn" href="/admin/orders/${order.id}/ticket" target="_blank">${icon('print', 17)} ${esc(L.ticket)}</a>
 ${order.payment_proof ? `<a class="btn" href="/admin/orders/${order.id}/proof" target="_blank">${icon('eye', 17)} ${esc(L.proof)}</a>` : ''}
 <span class="spacer" style="margin-left:auto"></span>
-<a class="btn" href="/admin/customers/${order.customer.id}">${icon('users', 17)} ${esc(L.openCustomer)}</a></div>`;
+<a class="btn" href="/admin/customers/${order.customer.id}">${icon('users', 17)} ${esc(L.openCustomer)}</a>
+<form method="post" action="/admin/orders/${order.id}/duplicate" class="inline" data-confirm="${esc(L.duplicateConfirm)}">
+<button class="btn">${icon('refresh', 17)} ${esc(L.duplicate)}</button></form></div>`;
 
   const body = `<p><a href="/admin/orders">${esc(L.back)}</a> · <a href="/admin?day=${esc(day)}">${esc(L.backToDay)}</a></p>
 ${orderCard(L, locale, order, `/admin/orders/${order.id}`)}

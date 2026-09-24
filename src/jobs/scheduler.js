@@ -257,34 +257,10 @@ export async function winback(now = new Date()) {
   if (db.getSetting(`winback:${day}`)) return 0;
   db.setSetting(`winback:${day}`, new Date().toISOString());
 
-  const expires = new Date(now.getTime() + 14 * 864e5).toLocaleDateString('en-CA');
   let sent = 0;
   for (const customer of db.inactiveCustomers(shop.winbackDays, { limit: 30 })) {
-    // One personal, single-use code per customer, so the offer cannot be shared.
-    const code = `RETOUR${String(customer.id).padStart(3, '0')}${Math.random().toString(36).slice(2, 5).toUpperCase()}`;
-    if (db.getCouponByCode(code)) continue;
-    db.createCoupon({
-      code,
-      kind: 'amount',
-      value: shop.winbackDiscount,
-      min_subtotal: 0,
-      max_uses: 1,
-      once_per_customer: 1,
-      expires_on: expires,
-      active: 1,
-    });
-    const locale = normalizeLocale(customer.locale);
     try {
-      const result = await notify(customer, {
-        message: text(customer.phone, t(locale, 'winback', {
-          name: customer.name,
-          amount: money(locale, shop.winbackDiscount),
-          code,
-          days: 14,
-        })),
-        templateKey: 'winback',
-        templateParams: [customer.name || '', code],
-      });
+      const result = await winbackOne(customer, shop);
       if (result === 'sent' || result === 'template') sent += 1;
     } catch (err) {
       logger.error(`Win-back to ${customer.phone} failed:`, err.message);
@@ -293,6 +269,42 @@ export async function winback(now = new Date()) {
   }
   if (sent) logger.info(`Win-back: ${sent} customer(s) messaged`);
   return sent;
+}
+
+/**
+ * One win-back: a personal single-use coupon, then the message -- as plain text
+ * inside the 24h window, as the approved template outside it.
+ *
+ * Shared with the dashboard's "relancer" button, because the template Meta
+ * approved literally promises a code: sending it without creating one would
+ * make the shop lie.
+ */
+export async function winbackOne(customer, shop = settings.get(), now = new Date()) {
+  const expires = new Date(now.getTime() + 14 * 864e5).toLocaleDateString('en-CA');
+  // Random suffix, so a second nudge to the same customer is a different code.
+  const code = `RETOUR${String(customer.id).padStart(3, '0')}${Math.random().toString(36).slice(2, 5).toUpperCase()}`;
+  if (db.getCouponByCode(code)) return 'skipped';
+  db.createCoupon({
+    code,
+    kind: 'amount',
+    value: shop.winbackDiscount,
+    min_subtotal: 0,
+    max_uses: 1,
+    once_per_customer: 1,
+    expires_on: expires,
+    active: 1,
+  });
+  const locale = normalizeLocale(customer.locale);
+  return notify(customer, {
+    message: text(customer.phone, t(locale, 'winback', {
+      name: customer.name,
+      amount: money(locale, shop.winbackDiscount),
+      code,
+      days: 14,
+    })),
+    templateKey: 'winback',
+    templateParams: [customer.name || '', code],
+  });
 }
 
 export function startScheduler() {

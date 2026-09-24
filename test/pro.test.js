@@ -586,3 +586,11 @@ test('a pasted token is traded for a long-lived one when Meta allows it', async 
   assert.equal(declined, null);
   config.appId = before;
 });
+
+test('broadcast audiences cover areas and customers who drifted away', async () => {
+  const html = await (await get('/admin/broadcast')).text();
+  assert.match(html, /Sans commande depuis 30 jours/);
+  assert.match(html, /Sans commande depuis 90 jours/);
+  assert.match(html, /Quartier : Gombe/);
+});
+

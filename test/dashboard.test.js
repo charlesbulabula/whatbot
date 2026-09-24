@@ -412,3 +412,73 @@ test('the payment queue gathers everything waiting on a decision', async () => {
   assert.doesNotMatch(after, new RegExp(momo.order.reference));
   assert.match(after, new RegExp(cash.order.reference));
 });
+
+test('a past order can be taken again, at today’s prices, minus what is gone', async () => {
+  const { order } = seedOrder({ phone: '243870000120', name: 'Habituée' });
+  const products = db.listProducts();
+  const first = products[0];
+
+  // Yesterday's price is not today's.
+  db.updateProduct(first.id, { price_medium: first.price_medium + 500 });
+
+  const res = await post(`/admin/orders/${order.id}/duplicate`, '');
+  assert.equal(res.status, 302);
+  const copy = db.getOrder(Number(res.headers.get('location').match(/orders\/(\d+)/)[1]));
+  assert.notEqual(copy.id, order.id);
+  assert.equal(copy.status, 'awaiting_payment');
+  assert.equal(copy.customer_id, order.customer_id);
+  assert.equal(copy.items[0].unit_price, first.price_medium + 500, 'priced today, not then');
+  assert.equal(copy.neighborhood, order.neighborhood, 'same address');
+
+  // With two items, one taken off sale, the copy keeps the other and says so.
+  const second = products[1];
+  const two = db.createOrder({
+    customer: db.getCustomerById(order.customer_id),
+    items: [
+      { productId: first.id, size: 'medium', quantity: 1, unitPrice: first.price_medium },
+      { productId: second.id, size: 'medium', quantity: 1, unitPrice: second.price_medium },
+    ],
+    subtotal: first.price_medium + second.price_medium,
+    deliveryFee: 2000,
+    discount: 0,
+    total: first.price_medium + second.price_medium + 2000,
+    paymentMethod: 'momo',
+    name: 'Habituée',
+    neighborhood: 'Gombe',
+    addressNote: 'Av. Test 1',
+  });
+  db.updateProduct(first.id, { in_stock: 0 });
+
+  const partial = await post(`/admin/orders/${two.id}/duplicate`, '');
+  assert.match(flashOf(partial), /Non repris/);
+  const kept = db.getOrder(Number(partial.headers.get('location').match(/orders\/(\d+)/)[1]));
+  assert.equal(kept.items.length, 1);
+  assert.equal(kept.items[0].product_id, second.id);
+
+  // Nothing left at all is refused rather than creating an empty order.
+  db.updateProduct(second.id, { in_stock: 0 });
+  const refused = await post(`/admin/orders/${two.id}/duplicate`, '');
+  assert.match(flashOf(refused), /Aucun article/);
+});
+
+
+test('the win-back button reaches a customer, or says plainly why it cannot', async () => {
+  const { customer } = seedOrder({ phone: '243870000121', name: 'Partie' });
+
+  // Inside the 24h window: it goes as a plain message, with its own coupon.
+  db.touchCustomer(customer.phone);
+  const before = db.listCoupons().length;
+  const sent = await post(`/admin/customers/${customer.id}/nudge`, '');
+  assert.equal(sent.status, 302);
+  assert.match(flashOf(sent), /Relance envoyée/);
+  assert.equal(db.listCoupons().length, before + 1, 'a single-use code is created');
+  const code = db.listCoupons().find((c) => c.code.startsWith('RETOUR'));
+  assert.equal(code.max_uses, 1, 'the offer cannot be shared');
+
+  // Outside the window, with no approved template, it refuses rather than
+  // pretending. last_seen_at is written by the system, never by a form, so the
+  // stale customer is built here instead of aged through the API.
+  const { winbackOne } = await import('../src/jobs/scheduler.js');
+  const stale = { ...db.getCustomerById(customer.id), last_seen_at: '2020-01-01 00:00:00' };
+  assert.equal(await winbackOne(stale), 'skipped');
+});
