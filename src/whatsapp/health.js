@@ -6,6 +6,7 @@
 // visible, on the dashboard and in the settings.
 import { config } from '../config.js';
 import { logger } from '../utils/logger.js';
+import { currentToken, tokenSource } from './token.js';
 
 const TTL_OK_MS = 10 * 60 * 1000; // a healthy token is re-checked every 10 minutes
 const TTL_BAD_MS = 60 * 1000; // a broken one, every minute, so a fix shows up fast
@@ -18,7 +19,8 @@ let cache = null; // { at, result }
  */
 export async function tokenHealth({ force = false } = {}) {
   if (!config.whatsapp.enabled) return { ok: true, reason: null, disabled: true };
-  if (!config.whatsapp.token || !config.whatsapp.phoneNumberId) {
+  const token = currentToken();
+  if (!token || !config.whatsapp.phoneNumberId) {
     return { ok: false, reason: 'unconfigured' };
   }
   const ttl = cache?.result?.ok ? TTL_OK_MS : TTL_BAD_MS;
@@ -29,7 +31,7 @@ export async function tokenHealth({ force = false } = {}) {
   let result;
   try {
     const res = await fetch(url, {
-      headers: { Authorization: `Bearer ${config.whatsapp.token}` },
+      headers: { Authorization: `Bearer ${token}` },
       signal: AbortSignal.timeout(8000),
     });
     const json = await res.json().catch(() => ({}));
@@ -38,6 +40,7 @@ export async function tokenHealth({ force = false } = {}) {
       const expired = json.error.code === 190 && json.error.error_subcode === 463;
       result = {
         ok: false,
+        source: tokenSource(),
         reason: expired ? 'expired' : 'invalid',
         message: json.error.message,
         expiresAt: expired ? expiryFrom(json.error.message) : null,
@@ -46,6 +49,7 @@ export async function tokenHealth({ force = false } = {}) {
       result = {
         ok: true,
         reason: null,
+        source: tokenSource(),
         number: json.display_phone_number || null,
         name: json.verified_name || null,
         quality: json.quality_rating || null,

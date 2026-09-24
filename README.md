@@ -248,9 +248,14 @@ Le bot tourne aujourd'hui sur le **numéro de test** de Meta (5 destinataires
 maximum, jeton qui expire toutes les 24 h). La procédure complète pour passer à
 un vrai numéro est dans **[docs/meta-setup.md](docs/meta-setup.md)**.
 
-En résumé : vérifier l'entreprise, ajouter le vrai numéro, créer un jeton
-permanent d'utilisateur système, pointer le webhook, puis lancer le workflow
-**Meta - setup** :
+**En attendant, sur le numéro de test** : le jeton Meta expire toutes les 24 h.
+Renouvelez-le depuis *Réglages → Système → Jeton WhatsApp* — collez le nouveau,
+il est vérifié auprès de Meta avant d'être gardé, et il survit aux déploiements.
+Aucun accès serveur nécessaire.
+
+En résumé pour le vrai numéro : vérifier l'entreprise, ajouter le numéro, créer
+un jeton permanent d'utilisateur système, pointer le webhook, puis lancer le
+workflow **Meta - setup** :
 
 - `mode: check` — ne modifie rien et liste précisément ce qui manque ;
 - `mode: apply` — abonne le compte WhatsApp à l'app et soumet les six modèles

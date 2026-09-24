@@ -10,6 +10,7 @@ function waRows(L, health) {
       : health.reason === 'unreachable' ? L.waTokenUnknown : L.waTokenInvalid;
   return `<dt>${esc(L.waTokenState)}</dt><dd>${badge(label, tone, { dot: health.ok })}
 ${health.expiresAt ? `<span class="muted"> — ${esc(health.expiresAt)}</span>` : ''}</dd>
+${health.source ? `<dt>${esc(L.waTokenSource)}</dt><dd>${esc(health.source === 'dashboard' ? L.waTokenFromDashboard : L.waTokenFromEnv)}</dd>` : ''}
 ${health.number ? `<dt>${esc(L.waNumber)}</dt><dd>${esc(health.number)}${health.name ? ` — ${esc(health.name)}` : ''}</dd>` : ''}
 ${health.quality ? `<dt>${esc(L.waQuality)}</dt><dd>${esc(health.quality)}</dd>` : ''}`;
 }
@@ -30,6 +31,28 @@ const SETTINGS_TABS = (L) => [
 const form = (L, tab, inner) => `<form method="post" action="/admin/settings">
 <input type="hidden" name="tab" value="${tab}">${inner}
 <div class="actions" style="margin-top:1.25rem"><button class="btn btn--primary">${icon('check', 17)} ${esc(L.save)}</button></div></form>`;
+
+/**
+ * Pasting a fresh token from the dashboard. Meta's test number hands out a token
+ * that dies every 24 hours; without this the shop would need a redeploy each
+ * morning just to answer its customers.
+ */
+function tokenCard(L, shop, system) {
+  const fromDashboard = system.waHealth?.source === 'dashboard';
+  return card(`<p class="form-note" style="margin-top:0">${esc(L.waTokenHint)}</p>
+<form method="post" action="/admin/settings/wa-token">
+<div class="field"><label for="wa-token">${esc(L.waTokenPaste)}</label>
+<input id="wa-token" name="token" type="password" autocomplete="off" required minlength="40"
+  placeholder="EAA…" spellcheck="false"></div>
+<div class="actions" style="margin-top:.75rem">
+<button class="btn btn--primary">${icon('check', 17)} ${esc(L.waTokenSave)}</button>
+${fromDashboard
+    ? `</div></form><form method="post" action="/admin/settings/wa-token/clear" class="actions" style="margin-top:.5rem">
+<button class="btn">${icon('refresh', 17)} ${esc(L.waTokenUseEnv)}</button></form>`
+    : '</div></form>'}
+<p class="form-note">${esc(L.waTokenWhere)}</p>`,
+  { head: `${icon('key')}<h2>${esc(L.waTokenTitle)}</h2>` });
+}
 
 export function settingsPage(L, locale, data) {
   const { shop, smtpReady, tab = 'shop', system = {}, flash, flashTone, theme, role = 'owner', waHealth = null } = data;
@@ -139,7 +162,8 @@ ${waRows(L, system.waHealth)}
 <div class="actions">
 <a class="btn" href="/admin/backup">${icon('download', 17)} ${esc(L.downloadBackup)}</a>
 <a class="btn" href="/admin/audit">${icon('history', 17)} ${esc(L.navAudit)}</a></div>
-<p class="form-note">${esc(L.backupHint)}</p>`, { head: `${icon('shield')}<h2>${esc(L.tabSystem)}</h2>` }),
+<p class="form-note">${esc(L.backupHint)}</p>`, { head: `${icon('shield')}<h2>${esc(L.tabSystem)}</h2>` })
+    + tokenCard(L, shop, system),
   };
 
   const body = `${tabs(SETTINGS_TABS(L), tab)}${panels[tab] || panels.shop}`;

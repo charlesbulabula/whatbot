@@ -520,3 +520,44 @@ test('demo data can be created and removed without touching the real shop', asyn
 
   fs.rmSync(dir, { recursive: true, force: true });
 });
+
+/* ------------------------- refreshing the token ------------------------- */
+
+test('a token pasted in the dashboard overrides .env and survives a deploy', async () => {
+  const token = await import('../src/whatsapp/token.js');
+
+  assert.equal(token.tokenSource(), 'env', 'the .env token is used by default');
+
+  assert.equal(token.setOverrideToken('  EAAtest-override-token  '), true);
+  assert.equal(token.currentToken(), 'EAAtest-override-token', 'whitespace is trimmed');
+  assert.equal(token.tokenSource(), 'dashboard');
+  assert.equal(token.tokenFingerprint(), '…-token', 'only the tail is ever shown');
+  assert.doesNotMatch(token.tokenFingerprint(), /EAAtest/, 'the head is never exposed');
+
+  // An empty paste must not wipe a working token.
+  assert.equal(token.setOverrideToken('   '), false);
+  assert.equal(token.currentToken(), 'EAAtest-override-token');
+
+  token.clearOverrideToken();
+  assert.equal(token.tokenSource(), 'env');
+
+  // The override lives in the database, which a deploy never rewrites.
+  const db = await import('../src/db/index.js');
+  token.setOverrideToken('EAAsurvives-deploy');
+  assert.equal(db.getSetting('wa_token_override'), 'EAAsurvives-deploy');
+  token.clearOverrideToken();
+});
+
+test('a token Meta refuses is not kept', async () => {
+  const res = await fetch(`${base}/admin/settings/wa-token`, {
+    method: 'POST',
+    redirect: 'manual',
+    headers: { authorization: auth, origin: base, 'content-type': 'application/x-www-form-urlencoded' },
+    body: 'token=',
+  });
+  assert.equal(res.status, 302);
+  assert.match(decodeURIComponent(res.headers.get('location')), /Collez un jeton/);
+
+  const db = await import('../src/db/index.js');
+  assert.ok(!db.getSetting('wa_token_override'), 'nothing was stored');
+});

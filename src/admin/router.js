@@ -15,6 +15,7 @@ import * as settings from '../shop/settings.js';
 import { COUPON_KINDS, normalizeCode } from '../shop/coupons.js';
 import { smtpConfigured, sendTestEmail } from '../mail.js';
 import { tokenHealth, resetTokenHealth } from '../whatsapp/health.js';
+import { setOverrideToken, clearOverrideToken, tokenFingerprint } from '../whatsapp/token.js';
 import * as staff from '../shop/staff.js';
 import { vapid, push } from '../pwa.js';
 import * as waCatalog from '../shop/wa-catalog.js';
@@ -1000,6 +1001,30 @@ adminRouter.post('/settings', (req, res) => {
   resetTokenHealth();
   log(res, 'settings.save', tab);
   res.redirect(withFlash(`/admin/settings?tab=${tab}`, res.locals.L.saved));
+});
+
+// A token pasted here wins over .env and survives deployments, which is what
+// makes Meta's 24h test token bearable. It is never echoed back to the page.
+adminRouter.post('/settings/wa-token', async (req, res) => {
+  const { L } = res.locals;
+  const back = '/admin/settings?tab=system';
+  if (!setOverrideToken(req.body.token)) {
+    return res.redirect(`${withFlash(back, L.waTokenNeeded)}&tone=danger`);
+  }
+  resetTokenHealth();
+  const health = await tokenHealth({ force: true });
+  log(res, 'settings.wa_token', tokenFingerprint());
+  if (health.ok) return res.redirect(withFlash(back, L.waTokenAccepted));
+  clearOverrideToken();
+  resetTokenHealth();
+  res.redirect(`${withFlash(back, `${L.waTokenRefused} ${health.message || ''}`.trim())}&tone=danger`);
+});
+
+adminRouter.post('/settings/wa-token/clear', (req, res) => {
+  clearOverrideToken();
+  resetTokenHealth();
+  log(res, 'settings.wa_token', 'cleared');
+  res.redirect(withFlash('/admin/settings?tab=system', res.locals.L.saved));
 });
 
 adminRouter.post('/settings/test-email', async (req, res) => {

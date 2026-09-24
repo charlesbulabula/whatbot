@@ -162,6 +162,27 @@ noms ci-dessus dans les secrets GitHub correspondants et redéployez.
 
 ---
 
+## Rester sur le numéro de test
+
+Tant que vous n'avez pas les documents pour la vérification d'entreprise, le
+numéro de test fait très bien l'affaire — avec une seule contrainte : **son
+jeton expire toutes les 24 h**.
+
+Pas besoin de SSH ni de redéploiement pour le renouveler. Chaque matin :
+
+1. [Console WhatsApp](https://developers.facebook.com/apps/1803892427276261/whatsapp-business/wa-dev-console/)
+   → **Créer un nouveau token d'accès** → copier.
+2. Tableau de bord → *Réglages → Système → **Jeton WhatsApp*** → coller →
+   **Vérifier et enregistrer**.
+
+Le jeton est testé auprès de Meta **avant** d'être gardé : s'il est refusé,
+rien ne change et le message d'erreur de Meta s'affiche. Une fois accepté, le
+bandeau rouge disparaît immédiatement.
+
+Ce jeton est stocké en base, pas dans le `.env` : il **survit aux
+déploiements**. Le jour où vous aurez un jeton permanent, mettez-le dans le
+secret `WA_TOKEN` et cliquez sur *Revenir au jeton du serveur*.
+
 ## Le piège du secret GitHub
 
 **Chaque déploiement réécrit le `.env` du serveur à partir des secrets GitHub.**

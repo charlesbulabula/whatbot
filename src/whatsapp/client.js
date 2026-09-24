@@ -2,6 +2,7 @@ import { config } from '../config.js';
 import { logger } from '../utils/logger.js';
 import { logMessage } from '../db/index.js';
 import { summarize } from '../bot/messages.js';
+import { currentToken } from './token.js';
 
 const { whatsapp: wa } = config;
 const GRAPH = `https://graph.facebook.com/${wa.graphVersion}`;
@@ -102,7 +103,7 @@ function toPayload(msg) {
 async function graph(path, { method = 'GET', body } = {}) {
   const res = await fetch(`${GRAPH}/${path}`, {
     method,
-    headers: { Authorization: `Bearer ${wa.token}`, ...(body && { 'Content-Type': 'application/json' }) },
+    headers: { Authorization: `Bearer ${currentToken()}`, ...(body && { 'Content-Type': 'application/json' }) },
     body: body && JSON.stringify(body),
   });
   const json = await res.json().catch(() => ({}));
@@ -143,7 +144,7 @@ export async function markRead(messageId) {
 /** Downloads an inbound media file (payment screenshot) so the admin dashboard can display it. */
 export async function downloadMedia(mediaId) {
   const meta = await graph(encodeURIComponent(mediaId));
-  const res = await fetch(meta.url, { headers: { Authorization: `Bearer ${wa.token}` } });
+  const res = await fetch(meta.url, { headers: { Authorization: `Bearer ${currentToken()}` } });
   if (!res.ok) throw new WhatsAppError(`Media download failed (${res.status})`, { status: res.status });
   return { contentType: meta.mime_type || res.headers.get('content-type'), buffer: Buffer.from(await res.arrayBuffer()) };
 }

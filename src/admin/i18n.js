@@ -368,6 +368,7 @@ const fr = {
     'expense.delete': 'Dépense supprimée',
     'broadcast.send': 'Diffusion envoyée',
     'settings.save': 'Réglages enregistrés',
+    'settings.wa_token': 'Jeton WhatsApp changé',
     'backup.download': 'Sauvegarde téléchargée',
   },
 
@@ -647,6 +648,19 @@ const fr = {
   waTokenUnknown: 'Inconnu',
   waNumber: 'Numéro connecté',
   waQuality: 'Qualité du numéro',
+
+  waTokenTitle: 'Jeton WhatsApp',
+  waTokenHint: 'Sur le numéro de test de Meta, le jeton expire toutes les 24 h. Collez ici le nouveau : il est vérifié auprès de Meta avant d’être gardé, il remplace celui du serveur et il survit aux déploiements.',
+  waTokenPaste: 'Nouveau jeton',
+  waTokenSave: 'Vérifier et enregistrer',
+  waTokenUseEnv: 'Revenir au jeton du serveur',
+  waTokenWhere: 'Où le trouver : developers.facebook.com → votre app → WhatsApp → Configuration de l’API → « Créer un nouveau token d’accès ».',
+  waTokenNeeded: 'Collez un jeton.',
+  waTokenAccepted: 'Jeton accepté par Meta. Le bot peut de nouveau répondre.',
+  waTokenRefused: 'Meta refuse ce jeton, rien n’a été changé :',
+  waTokenSource: 'Origine du jeton',
+  waTokenFromDashboard: 'Collé dans le tableau de bord',
+  waTokenFromEnv: 'Fichier .env du serveur',
 
 };
 
@@ -1017,6 +1031,7 @@ const en = {
     'expense.delete': 'Expense deleted',
     'broadcast.send': 'Broadcast sent',
     'settings.save': 'Settings saved',
+    'settings.wa_token': 'WhatsApp token changed',
     'backup.download': 'Backup downloaded',
   },
 
@@ -1296,6 +1311,19 @@ const en = {
   waTokenUnknown: 'Unknown',
   waNumber: 'Connected number',
   waQuality: 'Number quality',
+
+  waTokenTitle: 'WhatsApp token',
+  waTokenHint: 'On Meta’s test number the token expires every 24 hours. Paste the new one here: it is checked with Meta before being kept, it overrides the server’s, and it survives deployments.',
+  waTokenPaste: 'New token',
+  waTokenSave: 'Check and save',
+  waTokenUseEnv: 'Go back to the server token',
+  waTokenWhere: 'Where to find it: developers.facebook.com → your app → WhatsApp → API Setup → "Create a new access token".',
+  waTokenNeeded: 'Paste a token.',
+  waTokenAccepted: 'Token accepted by Meta. The bot can answer again.',
+  waTokenRefused: 'Meta refused this token, nothing was changed:',
+  waTokenSource: 'Token source',
+  waTokenFromDashboard: 'Pasted in the dashboard',
+  waTokenFromEnv: 'Server .env file',
 
 };
 
