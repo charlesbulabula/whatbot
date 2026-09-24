@@ -66,6 +66,21 @@ export const normalizeUsername = (v) =>
  * Returns { username, name, role } or null. The .env owner is checked first so
  * the shop can always get back in, even with an empty or broken staff table.
  */
+/**
+ * Resolves an account from a username alone, for a session cookie that was
+ * already proven genuine. Re-read every request, so deactivating an account
+ * or changing its role takes effect immediately.
+ */
+export function accountFor(username) {
+  const user = String(username || '');
+  if (config.admin.password && sameSecret(user, config.admin.user)) {
+    return { username: config.admin.user, name: config.admin.user, role: 'owner', builtin: true };
+  }
+  const account = byUsername(normalizeUsername(user));
+  if (!account || !account.active) return null;
+  return { id: account.id, username: account.username, name: account.name || account.username, role: account.role };
+}
+
 export function authenticate(username, password) {
   const user = String(username || '');
   if (config.admin.password && sameSecret(user, config.admin.user) && sameSecret(password, config.admin.password)) {

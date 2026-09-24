@@ -9,6 +9,8 @@ const COPY = {
   fr: {
     notFoundTitle: 'Page introuvable',
     notFoundText: 'Ce lien n’existe pas, ou n’est plus valable.',
+    forbiddenTitle: 'Accès refusé',
+    forbiddenText: 'Votre compte n’a pas accès à cette partie du tableau de bord.',
     errorTitle: 'Une erreur est survenue',
     errorText: 'Le problème vient de nous. Réessayez dans un instant.',
     backAdmin: 'Retour au tableau de bord',
@@ -17,6 +19,8 @@ const COPY = {
   en: {
     notFoundTitle: 'Page not found',
     notFoundText: 'This link does not exist, or is no longer valid.',
+    forbiddenTitle: 'Access denied',
+    forbiddenText: 'Your account cannot open this part of the dashboard.',
     errorTitle: 'Something went wrong',
     errorText: 'The problem is on our side. Please try again in a moment.',
     backAdmin: 'Back to the dashboard',
@@ -40,12 +44,12 @@ ${href ? `<a class="btn btn--primary" href="${href}">${esc(label)}</a>` : ''}</d
 /** Renders the themed error page at any status. Used by the handlers and by routes. */
 export function sendError(req, res, status = 404) {
   const L = copyFor(req);
-  const missing = status === 404;
+  const key = status === 404 ? 'notFound' : status === 403 ? 'forbidden' : 'error';
   res.status(status).type('html').send(
     page(L, {
       code: status,
-      title: missing ? L.notFoundTitle : L.errorTitle,
-      text: missing ? L.notFoundText : L.errorText,
+      title: L[`${key}Title`],
+      text: L[`${key}Text`],
       href: req.path.startsWith('/admin') ? '/admin' : null,
       label: L.backAdmin,
     }),

@@ -20,6 +20,7 @@ import {
   setOverrideToken, clearOverrideToken, tokenFingerprint, exchangeForLongLived,
 } from '../whatsapp/token.js';
 import * as staff from '../shop/staff.js';
+import * as session from './session.js';
 import { vapid, push } from '../pwa.js';
 import * as waCatalog from '../shop/wa-catalog.js';
 import multer from 'multer';
@@ -58,26 +59,104 @@ function recordFailure(ip) {
   if (failures.size > 10_000) failures.clear(); // bounded memory under a distributed attack
 }
 
+const readCookie = (req, name) =>
+  String(req.get('cookie') || '')
+    .split(';')
+    .map((c) => c.trim().split('='))
+    .find(([k]) => k === name)?.[1];
+
+adminRouter.use((req, res, next) => {
+  const locale = normalizeLocale(readCookie(req, 'admin_lang') || DEFAULT_LOCALE);
+  res.locals.locale = locale;
+  res.locals.L = adminDictionaries[locale] || adminDictionaries.fr;
+  // No cookie means "follow the device", which the stylesheet handles on its own.
+  const theme = readCookie(req, 'admin_theme');
+  res.locals.theme = theme === 'dark' || theme === 'light' ? theme : '';
+  next();
+});
+
+/* ------------------------------- sign in -------------------------------- */
+
+const loginBody = express.urlencoded({ extended: false, limit: '4kb' });
+
+adminRouter.get('/login', (req, res) => {
+  if (currentAccount(req)) return res.redirect('/admin');
+  res.type('html').send(views.loginPage(res.locals.L, {
+    theme: res.locals.theme,
+    next: safeBack(req.query.next, ''),
+    bye: req.query.bye === '1',
+  }));
+});
+
+adminRouter.post('/login', loginBody, (req, res) => {
+  const { L } = res.locals;
+  // The sign-in form is the one POST the CSRF check below cannot see, since it
+  // runs after the auth gate. Same rule, applied here.
+  const source = req.get('origin') || req.get('referer');
+  if (source) {
+    try {
+      if (new URL(source).host !== req.get('host')) return res.status(403).type('text/plain').send('Cross-site request refused');
+    } catch {
+      return res.status(403).type('text/plain').send('Cross-site request refused');
+    }
+  }
+  if (tooManyFailures(req.ip)) {
+    return res.status(429).type('html').send(views.loginPage(L, { theme: res.locals.theme, error: L.loginThrottled }));
+  }
+  const account = staff.authenticate(req.body?.username, req.body?.password);
+  if (!account) {
+    recordFailure(req.ip);
+    logger.warn(`Failed dashboard login from ${req.ip}`);
+    return res.status(401).type('html').send(
+      views.loginPage(L, {
+        theme: res.locals.theme,
+        error: L.loginFailed,
+        username: req.body?.username,
+        next: safeBack(req.body?.next, ''),
+      }),
+    );
+  }
+  failures.delete(req.ip);
+  session.issue(res, account.username, { remember: !!req.body?.remember, secure: req.secure });
+  res.redirect(safeBack(req.body?.next, '/admin'));
+});
+
+/** The account behind this request: a session cookie, or Basic credentials. */
+function currentAccount(req) {
+  const named = session.read(req);
+  if (named) {
+    const account = staff.accountFor(named);
+    if (account) return account;
+  }
+  const [scheme, encoded] = String(req.get('authorization') || '').split(' ');
+  if (scheme !== 'Basic' || !encoded) return null;
+  const decoded = Buffer.from(encoded, 'base64').toString('utf8');
+  const sep = decoded.indexOf(':');
+  return sep > 0 ? staff.authenticate(decoded.slice(0, sep), decoded.slice(sep + 1)) : null;
+}
+
 adminRouter.use((req, res, next) => {
   if (!config.admin.password) return res.status(503).type('text/plain').send('Admin disabled: set ADMIN_PASSWORD in .env');
   if (tooManyFailures(req.ip)) {
     return res.status(429).set('Retry-After', String(FAILURE_WINDOW_MS / 1000)).send('Too many failed attempts, try again later');
   }
-  const [scheme, encoded] = String(req.get('authorization') || '').split(' ');
-  if (scheme === 'Basic' && encoded) {
-    const decoded = Buffer.from(encoded, 'base64').toString('utf8');
-    const sep = decoded.indexOf(':');
-    const account = sep > 0 ? staff.authenticate(decoded.slice(0, sep), decoded.slice(sep + 1)) : null;
-    if (account) {
-      failures.delete(req.ip);
-      res.locals.actor = account.username;
-      res.locals.account = account;
-      return next();
-    }
+  const account = currentAccount(req);
+  if (account) {
+    failures.delete(req.ip);
+    res.locals.actor = account.username;
+    res.locals.account = account;
+    return next();
+  }
+  if (req.get('authorization')) {
     recordFailure(req.ip);
     logger.warn(`Failed dashboard login from ${req.ip}`);
   }
-  res.set('WWW-Authenticate', 'Basic realm="whatbot admin", charset="UTF-8"').status(401).send('Authentication required');
+  // A person gets the sign-in page; a script keeps the 401 it knows how to handle.
+  if (req.method === 'GET' && (req.get('accept') || '').includes('text/html')) {
+    const next_ = encodeURIComponent(req.originalUrl || '/admin');
+    return res.redirect(`/admin/login?next=${next_}`);
+  }
+  res.status(401).type('text/plain').send('Authentication required');
 });
 
 // Basic auth credentials are sent automatically by the browser, so reject
@@ -101,21 +180,7 @@ mountLiveUpdates(adminRouter);
 
 /* --------------------------- language & theme --------------------------- */
 
-const readCookie = (req, name) =>
-  String(req.get('cookie') || '')
-    .split(';')
-    .map((c) => c.trim().split('='))
-    .find(([k]) => k === name)?.[1];
 
-adminRouter.use((req, res, next) => {
-  const locale = normalizeLocale(readCookie(req, 'admin_lang') || DEFAULT_LOCALE);
-  res.locals.locale = locale;
-  res.locals.L = adminDictionaries[locale] || adminDictionaries.fr;
-  // No cookie means "follow the device", which the stylesheet handles on its own.
-  const theme = readCookie(req, 'admin_theme');
-  res.locals.theme = theme === 'dark' || theme === 'light' ? theme : '';
-  next();
-});
 
 /** Which area of the dashboard a path belongs to, for the role check. */
 function areaOf(path) {
@@ -136,9 +201,7 @@ adminRouter.use((req, res, next) => {
   // Always allowed: the language and theme toggles, the event stream, signing out.
   if (['/lang', '/theme', '/events', '/logout'].includes(req.path)) return next();
   if (staff.can(role, areaOf(req.path))) return next();
-  res.status(403).type('text/html').send(`<!doctype html><meta charset="utf-8">
-<body style="font-family:system-ui;padding:2rem"><h1>403</h1><p>${views.esc(res.locals.L?.forbidden || 'Not allowed')}</p>
-<p><a href="/admin">←</a></p>`);
+  sendError(req, res, 403);
 });
 
 /** Where a header toggle should send the admin back to. */
@@ -167,17 +230,9 @@ adminRouter.get('/lang', (req, res) => {
   res.redirect(backToPage(req));
 });
 
-// Basic Auth has no sign-out: answering 401 once makes the browser drop the
-// cached credentials, which is the closest thing to logging out.
 adminRouter.get('/logout', (req, res) => {
-  const { L } = res.locals;
-  res
-    .set('WWW-Authenticate', 'Basic realm="whatbot admin", charset="UTF-8"')
-    .status(401)
-    .type('text/html')
-    .send(`<!doctype html><meta charset="utf-8"><title>${views.esc(L.loggedOut)}</title>
-<body style="font-family:system-ui;padding:2rem"><p>${views.esc(L.loggedOut)}</p>
-<p><a href="/admin">${views.esc(L.backToDashboard)}</a></p>`);
+  session.clear(res);
+  res.redirect('/admin/login?bye=1');
 });
 
 /* ------------------------------- helpers ------------------------------- */

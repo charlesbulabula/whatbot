@@ -35,3 +35,39 @@ test('the dashboard 404 offers a way back, a public one does not', async () => {
   const publicPage = await (await fetch(`${base}/nope`)).text();
   assert.doesNotMatch(publicPage, /href="\/admin"/);
 });
+
+test('a browser gets the sign-in page, a script keeps its 401', async () => {
+  const page = await fetch(`${base}/admin`, { headers: { accept: 'text/html' }, redirect: 'manual' });
+  assert.equal(page.status, 302);
+  assert.match(page.headers.get('location'), /\/admin\/login/);
+
+  const script = await fetch(`${base}/admin`);
+  assert.equal(script.status, 401);
+
+  const login = await (await fetch(`${base}/admin/login`)).text();
+  assert.match(login, /Connectez-vous à votre compte/);
+  assert.doesNotMatch(login, /WWW-Authenticate/);
+});
+
+test('signing in opens a session, signing out closes it', async () => {
+  const body = new URLSearchParams({ username: 'admin', password: 'pw', remember: '1' });
+  const bad = await fetch(`${base}/admin/login`, { method: 'POST', body: new URLSearchParams({ username: 'admin', password: 'x' }) });
+  assert.equal(bad.status, 401);
+  assert.match(await bad.text(), /incorrect/);
+
+  const ok = await fetch(`${base}/admin/login`, { method: 'POST', body, redirect: 'manual' });
+  assert.equal(ok.status, 302);
+  const cookie = ok.headers.getSetCookie().find((c) => c.startsWith('admin_session='));
+  assert.ok(cookie, 'a session cookie is set');
+  assert.match(cookie, /HttpOnly/i);
+  assert.match(cookie, /SameSite=Lax/i);
+
+  const jar = cookie.split(';')[0];
+  const dash = await fetch(`${base}/admin`, { headers: { cookie: jar, accept: 'text/html' } });
+  assert.equal(dash.status, 200);
+
+  // A tampered signature is refused.
+  const forged = `admin_session=${Buffer.from('admin').toString('base64url')}.${Date.now() + 1e6}.deadbeef`;
+  const refused = await fetch(`${base}/admin`, { headers: { cookie: forged } });
+  assert.equal(refused.status, 401);
+});

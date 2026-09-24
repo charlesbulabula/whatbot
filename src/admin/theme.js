@@ -465,6 +465,26 @@ dialog.confirm[data-tone=danger] .confirm__ok:hover{filter:brightness(.92)}
   @keyframes confirm-in{from{opacity:0;transform:translateY(-6px) scale(.98)}to{opacity:1;transform:none}}
 }
 @media print{dialog.confirm{display:none!important}}
+.auth{min-height:100vh;display:grid;place-content:center;justify-items:center;gap:1.25rem;
+  padding:2.5rem 1.25rem;background:var(--hk-bg-secondary);width:100%}
+.auth__brand{display:flex;align-items:center;gap:.625rem;font-size:1.125rem;font-weight:700;
+  color:var(--hk-text-primary)}
+.auth__logo{width:38px;height:38px;border-radius:var(--radius-lg);display:grid;place-items:center;
+  background:var(--primary);color:#fff}
+.auth__card{width:min(24rem,100%);padding:1.75rem 1.625rem 1.5rem}
+.auth__title{font-size:1.125rem;font-weight:700;text-align:center;margin:0 0 1.25rem}
+.auth__card .field{margin-bottom:.875rem}
+.auth__check{display:flex;align-items:center;justify-content:center;gap:.45rem;margin:.25rem 0 1rem;
+  font-size:.8125rem;color:var(--hk-text-secondary);cursor:pointer}
+.auth__submit{text-transform:uppercase;letter-spacing:.04em;padding-top:.5625rem;padding-bottom:.5625rem}
+.auth__foot{margin:0;font-size:.8125rem;color:var(--hk-text-tertiary)}
+.input-affix{position:relative;display:block}
+.input-affix>input{width:100%;padding-right:2.5rem}
+.input-suffix{position:absolute;top:50%;right:.5rem;transform:translateY(-50%);display:grid;
+  place-items:center;width:1.875rem;height:1.875rem;border:0;background:transparent;cursor:pointer;
+  color:var(--hk-text-tertiary);border-radius:var(--radius-sm)}
+.input-suffix:hover{color:var(--hk-text-primary);background:var(--hk-bg-hover)}
+.input-suffix.on{color:var(--primary)}
 .errpage{min-height:100vh;display:grid;place-content:center;justify-items:center;text-align:center;
   gap:.5rem;padding:2rem 1.25rem;background:var(--hk-bg-secondary);color:var(--hk-text-primary)}
 .errpage__code{font-size:.8125rem;font-weight:700;letter-spacing:.14em;color:var(--hk-text-tertiary)}
