@@ -84,9 +84,45 @@ export const iconAction = (href, name, label, { tone = '', target = '' } = {}) =
 
 /** Same, as a one-button POST form (status change, delete...). */
 export const iconPost = (action, name, label, { tone = '', confirm = '', fields = {} } = {}) =>
-  `<form method="post" action="${action}"${confirm ? ` onsubmit="return confirm('${esc(confirm)}')"` : ''}>
+  `<form method="post" action="${action}"${confirm ? ` data-confirm="${esc(confirm)}"${tone === 'danger' ? ' data-confirm-tone="danger"' : ''}` : ''}>
 ${Object.entries(fields).map(([k, v]) => `<input type="hidden" name="${esc(k)}" value="${esc(v)}">`).join('')}
 <button class="icon-btn${tone ? ` icon-btn--${tone}` : ''}" data-tip="${esc(label)}" aria-label="${esc(label)}">${icon(name, 17)}</button></form>`;
+
+/**
+ * One dialog for the whole page, opened by any form carrying `data-confirm`.
+ * Replaces the browser's own confirm(), which ignores the theme entirely.
+ */
+export const confirmDialog = (L) => `<dialog class="confirm" id="confirm-dialog">
+<form method="dialog" class="confirm__box">
+<div class="confirm__head"><span class="confirm__icon">${icon('alert', 22)}</span>
+<h2 class="confirm__title">${esc(L.confirmTitle)}</h2></div>
+<p class="confirm__msg"></p>
+<div class="confirm__actions">
+<button class="btn" value="cancel">${esc(L.confirmNo)}</button>
+<button class="btn btn--primary confirm__ok" value="ok" autofocus>${esc(L.confirmYes)}</button>
+</div></form></dialog>
+<script>(function(){
+  var dlg=document.getElementById('confirm-dialog');
+  if(!dlg||typeof dlg.showModal!=='function')return;
+  var msg=dlg.querySelector('.confirm__msg'),target=null;
+  document.addEventListener('submit',function(e){
+    var f=e.target;
+    if(!f||f.tagName!=='FORM'||f.dataset.confirmed==='1')return;
+    var text=f.getAttribute('data-confirm');
+    if(!text)return;
+    e.preventDefault();
+    target=f;
+    msg.textContent=text;
+    dlg.dataset.tone=f.getAttribute('data-confirm-tone')||'';
+    dlg.showModal();
+  },true);
+  dlg.addEventListener('close',function(){
+    var f=target;target=null;
+    if(dlg.returnValue!=='ok'||!f)return;
+    f.dataset.confirmed='1';
+    if(f.requestSubmit)f.requestSubmit();else f.submit();
+  });
+})();</script>`;
 
 /** Table wrapper with a header row; `headers` items may be strings or {label, num, sort}. */
 export function table(headers, rows, { sortBy, sortDir, sortUrl } = {}) {
@@ -266,7 +302,7 @@ ${flash ? alert(esc(flash), flashTone, flashTone === 'danger' ? 'alert' : 'check
 ${waBanner(L, waHealth)}
 ${!open ? alert(`${esc(L.closedBanner)} <a href="/admin/settings">${esc(L.closedBannerLink)}</a>`, 'warning', 'clock') : ''}
 ${body}</main></div>
-${shellScript(theme)}${pushScript(vapidPublicKey)}</body></html>`;
+${confirmDialog(L)}${shellScript(theme)}${pushScript(vapidPublicKey)}</body></html>`;
 }
 
 /**

@@ -374,3 +374,12 @@ test('the loyalty screen totals credit and referrals', async () => {
   const referrals = await (await get('/admin/loyalty?tab=referrals')).text();
   assert.match(referrals, /Parrain/);
 });
+
+test('destructive actions use the themed dialog, never the browser confirm()', async () => {
+  const html = await (await get('/admin/products')).text();
+  assert.match(html, /id="confirm-dialog"/);
+  assert.match(html, /data-confirm="[^"]+"/);
+  assert.match(html, /data-confirm-tone="danger"/);
+  assert.doesNotMatch(html, /onsubmit="return confirm/);
+  assert.doesNotMatch(html, /onclick="return confirm/);
+});

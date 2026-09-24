@@ -161,13 +161,13 @@ export function broadcastPage(L, locale, { audiences, lastResult, theme, flash, 
 
   const body = `${result}
 ${alert(esc(L.broadcastWindowHint), 'warning', 'info')}
-${card(`<form method="post" action="/admin/broadcast">
+${card(`<form method="post" action="/admin/broadcast" data-confirm="${esc(L.confirmBroadcast)}">
 <div class="field"><label for="b-aud">${esc(L.audience)}</label><select id="b-aud" name="audience">${options}</select></div>
 <div class="field" style="margin-top:.75rem"><label for="b-body">${esc(L.message)}</label>
 <textarea id="b-body" name="body" rows="4" required maxlength="900" placeholder="${esc(L.broadcastPlaceholder)}"></textarea></div>
 <p class="form-note">${esc(L.broadcastHint)}</p>
 <div class="actions" style="margin-top:.75rem">
-<button class="btn btn--primary" onclick="return confirm('${esc(L.confirmBroadcast)}')">${icon('megaphone', 17)} ${esc(L.sendBroadcast)}</button></div>
+<button class="btn btn--primary">${icon('megaphone', 17)} ${esc(L.sendBroadcast)}</button></div>
 </form>`, { head: `${icon('megaphone')}<h2>${esc(L.navBroadcast)}</h2>` })}
 ${section(L.audiences, table([L.audience, { label: L.customers, num: true }],
     audiences.map((a) => `<tr><td>${esc(a.label)}<br><span class="muted" style="font-size:.8125rem">${esc(a.hint)}</span></td>

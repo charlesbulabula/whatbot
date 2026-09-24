@@ -447,6 +447,24 @@ th a.on .sort{opacity:1;color:var(--primary)}
   th{background:#f1f1f1!important;color:#000!important}
   @page{margin:14mm}
 }
+dialog.confirm{border:0;padding:0;background:transparent;max-width:min(26rem,calc(100vw - 2rem));color:inherit}
+dialog.confirm::backdrop{background:rgba(15,23,26,.55);backdrop-filter:blur(2px)}
+.confirm__box{background:var(--hk-bg-primary);border:1px solid var(--hk-border-primary);
+  border-radius:var(--radius-lg);box-shadow:0 18px 48px rgba(0,0,0,.28);padding:1.25rem 1.375rem 1.125rem}
+.confirm__head{display:flex;align-items:center;gap:.75rem;margin-bottom:.625rem}
+.confirm__icon{width:40px;height:40px;flex:0 0 auto;border-radius:var(--radius-lg);display:grid;place-items:center;
+  background:var(--soft-gray);color:var(--on-soft-gray)}
+dialog.confirm[data-tone=danger] .confirm__icon{background:var(--soft-danger);color:var(--on-soft-danger)}
+.confirm__title{font-size:1rem;font-weight:700;margin:0;color:var(--hk-text-primary)}
+.confirm__msg{margin:0;color:var(--hk-text-secondary);line-height:1.5}
+.confirm__actions{display:flex;justify-content:flex-end;gap:.5rem;margin-top:1.125rem}
+dialog.confirm[data-tone=danger] .confirm__ok{background:var(--danger);border-color:var(--danger);color:#fff}
+dialog.confirm[data-tone=danger] .confirm__ok:hover{filter:brightness(.92)}
+@media (prefers-reduced-motion:no-preference){
+  dialog.confirm[open] .confirm__box{animation:confirm-in .16s ease-out}
+  @keyframes confirm-in{from{opacity:0;transform:translateY(-6px) scale(.98)}to{opacity:1;transform:none}}
+}
+@media print{dialog.confirm{display:none!important}}
 `;
 
 /* -------------------------------- icons --------------------------------- */

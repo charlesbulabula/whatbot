@@ -9,6 +9,7 @@ import { DEFAULT_LOCALE, money } from '../i18n/index.js';
 import { changeOrderStatus } from '../bot/orders.js';
 import { adminDictionaries } from './i18n.js';
 import { esc } from './views.js';
+import { confirmDialog } from './ui.js';
 import { CSS, FONT_LINK, FAVICON, icon } from './theme.js';
 import { optimise } from '../shop/routing.js';
 
@@ -66,7 +67,7 @@ ${extras ? `<span class="muted">(${esc(extras)})</span>` : ''} × ${it.quantity}
       const cash = o.payment_method === 'cash' && !done;
       const actions = !actionBase || done ? '' : `<div class="actions">
 ${o.status !== 'on_the_way' ? `<form method="post" action="${actionBase}/orders/${o.id}" class="inline"><input type="hidden" name="status" value="on_the_way"><button class="btn">${esc(L.route.onTheWay)}</button></form>` : ''}
-<form method="post" action="${actionBase}/orders/${o.id}" class="inline" onsubmit="return confirm('${esc(L.route.confirmDelivered)}')"><input type="hidden" name="status" value="delivered"><button class="btn btn--primary">${esc(L.route.delivered1)}</button></form></div>`;
+<form method="post" action="${actionBase}/orders/${o.id}" class="inline" data-confirm="${esc(L.route.confirmDelivered)}"><input type="hidden" name="status" value="delivered"><button class="btn btn--primary">${esc(L.route.delivered1)}</button></form></div>`;
       // Money line: a cash order tells the rider exactly what to collect.
       const payment = cash
         ? `<div class="badge badge--warning" style="font-size:.875rem">${esc(L.route.collect)} ${esc(money(locale, o.total))}</div>`
@@ -124,7 +125,7 @@ ${shareButton(L, base, position)}
 <section class="section"><div class="section__title"><h2>${esc(L.route.toDeliver)} (${ordered.length})</h2></div>
 ${ordered.length ? riderCards(L, ordered, { actionBase: base, numbered: true }) : `<div class="card"><div class="card__body"><p class="muted">${esc(L.route.empty)}</p></div></div>`}</section>
 ${delivered.length ? `<section class="section"><div class="section__title"><h2>${esc(L.route.delivered)} (${delivered.length})</h2></div>${riderCards(L, delivered)}</section>` : ''}
-</main></body></html>`;
+</main>${confirmDialog(L)}</body></html>`;
 }
 
 /** Lets the rider broadcast their position from the phone, with one tap. */
