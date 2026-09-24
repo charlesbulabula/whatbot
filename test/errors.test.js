@@ -134,3 +134,23 @@ test('after signing in you land on the page you asked for', async () => {
   });
   assert.match(await page.text(), /name="next" value="\/admin\/customers"/);
 });
+
+test('no page claims the token is dead when it is not, and the toast stays hidden', async () => {
+  const login = await fetch(`${base}/admin/login`, {
+    method: 'POST',
+    body: new URLSearchParams({ username: 'admin', password: 'pw' }),
+    redirect: 'manual',
+  });
+  const jar = login.headers.getSetCookie().find((c) => c.startsWith('admin_session=')).split(';')[0];
+
+  // WhatsApp is off in tests, so health is "disabled" and no page may warn.
+  for (const path of ['/admin', '/admin/payments', '/admin/orders', '/admin/products']) {
+    const html = await (await fetch(`${base}${path}`, { headers: { cookie: jar } })).text();
+    assert.doesNotMatch(html, /tab=system/, `${path} shows a false token warning`);
+  }
+
+  // The live-updates toast is empty until something happens: it must not paint.
+  const page = await (await fetch(`${base}/admin`, { headers: { cookie: jar } })).text();
+  assert.match(page, /id="live-toast"[^>]*hidden/);
+  assert.match(page, /\[hidden\]\{display:none!important\}/);
+});

@@ -265,6 +265,8 @@ td .switch{white-space:nowrap}
 .empty svg{color:var(--hk-border-secondary);margin-bottom:.5rem}
 .empty p{margin:0}
 
+/* display:flex below outranks the browser's [hidden] rule, so say it here. */
+[hidden]{display:none!important}
 .toast{position:fixed;right:1rem;bottom:1rem;z-index:1040;max-width:min(22rem,calc(100vw - 2rem));
   display:flex;align-items:center;gap:.5rem;padding:.625rem .875rem;border-radius:var(--radius-lg);
   background:var(--hk-text-primary);color:var(--hk-bg-primary);font-weight:500;font-size:.875rem;

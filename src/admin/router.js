@@ -896,7 +896,7 @@ adminRouter.get('/payments', (req, res) => {
     flash: takeFlash(req, res).message,
     theme: res.locals.theme,
     role: res.locals.role,
-    waHealth: tokenHealth(),
+    waHealth: res.locals.waHealth,
   }));
 });
 
