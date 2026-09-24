@@ -5,7 +5,8 @@ import { config } from '../config.js';
 import { logger } from '../utils/logger.js';
 import * as db from '../db/index.js';
 import { t, money, normalizeLocale, DEFAULT_LOCALE } from '../i18n/index.js';
-import { text } from './messages.js';
+import { text, buttons } from './messages.js';
+import { VALIDATE_PREFIX } from './admin-commands.js';
 import { notify } from './notify.js';
 import { publish } from '../utils/events.js';
 import { sendAlert } from '../mail.js';
@@ -36,7 +37,7 @@ async function safeNotify(customer, payload) {
 const fallbackName = (customer) => customer.name || t(normalizeLocale(customer.locale), 'customerFallbackName');
 
 /** Changes an order's status, tells the customer, and grants rewards on first payment. */
-export async function changeOrderStatus(orderId, status, { eta } = {}) {
+export async function changeOrderStatus(orderId, status, { eta, by = null } = {}) {
   if (!ORDER_STATUSES.includes(status)) throw new Error(`Unknown status ${status}`);
   const result = db.setOrderStatus(orderId, status, { eta });
   if (!result) return null;
@@ -58,6 +59,16 @@ export async function changeOrderStatus(orderId, status, { eta } = {}) {
     });
   }
   if (firstPayment) await rewardsAfterPayment(order);
+  // Someone validated a payment: everyone else who watches this shop should
+  // know, so two people do not chase the same screenshot.
+  if (status === 'paid' && previous !== 'paid' && by && by !== 'whatsapp') {
+    await notifyAdmin(t(DEFAULT_LOCALE, 'adminPaidBy', {
+      ref: order.reference,
+      total: money(DEFAULT_LOCALE, order.total),
+      by,
+      name: order.customer_name || customer.phone,
+    }));
+  }
   publish('status', { reference: order.reference, status });
   return { order, notified };
 }
@@ -123,7 +134,7 @@ export async function rewardsAfterPayment(order) {
  * Email matters because WhatsApp refuses free-form messages outside the 24h
  * window: without a template, the owner would otherwise miss the alert.
  */
-export async function notifyAdmin(body, templateParams = []) {
+export async function notifyAdmin(body, templateParams = [], { validateOrderId = null } = {}) {
   const email = sendAlert({ subject: body.split('\n')[0].slice(0, 120), text: body });
   const phone = settings.get().adminNotifyNumber;
   if (!phone) {
@@ -131,8 +142,14 @@ export async function notifyAdmin(body, templateParams = []) {
     return 'skipped';
   }
   const admin = db.getCustomer(phone) || { phone, locale: DEFAULT_LOCALE, last_seen_at: null };
+  // A payment to confirm gets a button, so saying yes costs one tap rather
+  // than a laptop. Outside the 24h window notify() falls back to the template,
+  // which carries no buttons -- the message still arrives, just plain.
+  const message = validateOrderId
+    ? buttons(phone, body, [{ id: `${VALIDATE_PREFIX}${validateOrderId}`, title: t(DEFAULT_LOCALE, 'btnAdmValidate') }])
+    : text(phone, body);
   const [result] = await Promise.all([
-    safeNotify(admin, { message: text(phone, body), templateKey: 'adminAlert', templateParams }),
+    safeNotify(admin, { message, templateKey: 'adminAlert', templateParams }),
     email,
   ]);
   return result;
@@ -150,7 +167,9 @@ export function notifyAdminProof(order, { paidByCredit = false, cash = false, su
     zone: order.neighborhood,
     url: `${config.publicUrl}/admin/orders/${order.id}`,
   });
-  return notifyAdmin(body, [order.reference, total]);
+  // Only a payment still to confirm deserves the button.
+  const pending = order.status === 'awaiting_payment' && !paidByCredit;
+  return notifyAdmin(body, [order.reference, total], { validateOrderId: pending ? order.id : null });
 }
 
 export { fallbackName };

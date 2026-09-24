@@ -223,7 +223,7 @@ routeRouter.post('/:day/:token/orders/:id', async (req, res) => {
     return res.status(400).send('Invalid request');
   }
   try {
-    const result = await changeOrderStatus(order.id, status);
+    const result = await changeOrderStatus(order.id, status, { by: L.roles.rider });
     setFlash(res, `${order.customer_name} : ${L.notified[result.notified] || L.saved}`);
     res.redirect(`/route/${day}/${token}`);
   } catch (err) {

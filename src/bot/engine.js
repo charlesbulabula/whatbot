@@ -17,7 +17,8 @@ import * as catalogue from '../shop/catalogue.js';
 import * as slots from '../shop/slots.js';
 import * as loyalty from '../shop/loyalty.js';
 import * as waCatalog from '../shop/wa-catalog.js';
-import { rewardsAfterPayment, notifyAdmin, notifyAdminProof, storeProof } from './orders.js';
+import { adminCommand } from './admin-commands.js';
+import { rewardsAfterPayment, notifyAdmin, notifyAdminProof, storeProof, changeOrderStatus } from './orders.js';
 import { publish } from '../utils/events.js';
 
 export const STATES = Object.freeze({
@@ -203,6 +204,13 @@ function describeInbound(msg) {
  * in order, then async tasks to run (admin alerts, rewards).
  */
 export function handleInbound(msg) {
+  // The shop answering its own alert, before anything else: the admin's number
+  // is also a customer here, so only an explicit command is intercepted.
+  const admin = adminCommand(msg.from, toInput(msg), { markPaid: (id) => changeOrderStatus(id, 'paid', { by: 'whatsapp' }) });
+  if (admin) {
+    db.logMessage(msg.from, 'in', describeInbound(msg));
+    return { messages: admin.messages, tasks: admin.tasks };
+  }
   const s = loadSession(msg);
   // Blocked customer: the message is still recorded so the dashboard shows it,
   // but nothing is sent back and no state changes.

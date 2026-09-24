@@ -169,6 +169,11 @@ export default {
   adminProof: (p) => `🧾 Payment proof received\n${p.ref} — ${p.total}\n${p.name}, ${p.zone}\n${p.url}`,
   adminPaidByCredit: (p) => `🎁 Order paid with credit\n${p.ref}\n${p.name}, ${p.zone}\n${p.url}`,
   adminHandoff: (p) => `🙋 ${p.name} (+${p.phone}) asks to talk to someone\n${p.url}`,
+  btnAdmValidate: '✅ Confirm payment',
+  admValidated: (p) => `✅ Payment confirmed: *${p.ref}* — ${p.total}\n${p.name} has been told.`,
+  admAlready: (p) => `ℹ️ *${p.ref}* is no longer waiting: ${p.status}.`,
+  admUnknownOrder: 'Order not found. Reply *ok* followed by the reference, or tap the button on the alert.',
+  adminPaidBy: (p) => `✅ Payment confirmed by *${p.by}*\n${p.ref} — ${p.total}\n${p.name}`,
   adminBadRating: (p) => `⚠️ Rating ${p.rating}/5 on ${p.ref} (${p.name}, +${p.phone})`,
 
   /* ------------------------- opening hours ----------------------------- */

@@ -173,6 +173,11 @@ export default {
   adminProof: (p) => `🧾 Preuve de paiement reçue\n${p.ref} — ${p.total}\n${p.name}, ${p.zone}\n${p.url}`,
   adminPaidByCredit: (p) => `🎁 Commande payée par crédit\n${p.ref}\n${p.name}, ${p.zone}\n${p.url}`,
   adminHandoff: (p) => `🙋 ${p.name} (+${p.phone}) demande à parler à quelqu’un\n${p.url}`,
+  btnAdmValidate: '✅ Valider le paiement',
+  admValidated: (p) => `✅ Paiement validé : *${p.ref}* — ${p.total}\n${p.name} a été prévenu.`,
+  admAlready: (p) => `ℹ️ *${p.ref}* n’est plus en attente : ${p.status}.`,
+  admUnknownOrder: 'Commande introuvable. Répondez *ok* suivi de la référence, ou touchez le bouton de l\u2019alerte.',
+  adminPaidBy: (p) => `✅ Paiement validé par *${p.by}*\n${p.ref} — ${p.total}\n${p.name}`,
   adminBadRating: (p) => `⚠️ Note ${p.rating}/5 sur ${p.ref} (${p.name}, +${p.phone})`,
 
   /* ------------------------- opening hours ----------------------------- */

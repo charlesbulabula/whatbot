@@ -487,7 +487,7 @@ adminRouter.post('/orders/:id/status', async (req, res) => {
   if (!ORDER_STATUSES.includes(status)) return res.status(400).send('Invalid status');
   try {
     const eta = str(req.body.eta, 40) || undefined;
-    const result = await changeOrderStatus(Number(req.params.id), status, { eta });
+    const result = await changeOrderStatus(Number(req.params.id), status, { eta, by: res.locals.actor });
     if (!result) return sendError(req, res, 404);
     log(res, 'order.status', result.order.reference, status);
     redirectWith(res, back, L.notified[result.notified] || L.saved);
