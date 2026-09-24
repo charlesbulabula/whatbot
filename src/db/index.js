@@ -150,11 +150,34 @@ export function countProducts() {
 export function createProduct(p) {
   const info = db
     .prepare(
-      `INSERT INTO products (name_fr, name_en, emoji, price_small, price_medium, price_large, in_stock, sort_order)
-       VALUES (@name_fr, @name_en, @emoji, @price_small, @price_medium, @price_large, @in_stock, @sort_order)`,
+      `INSERT INTO products (name_fr, name_en, emoji, price_small, price_medium, price_large, in_stock, sort_order, category)
+       VALUES (@name_fr, @name_en, @emoji, @price_small, @price_medium, @price_large, @in_stock, @sort_order, @category)`,
     )
-    .run({ emoji: '', in_stock: 1, sort_order: 0, ...p });
+    .run({ emoji: '', in_stock: 1, sort_order: 0, category: null, ...p });
   return getProduct(info.lastInsertRowid);
+}
+
+/**
+ * What people who bought these also bought, most common first. Real orders
+ * only -- a suggestion the shop's own history does not support is just noise.
+ */
+export function boughtTogether(productIds, { limit = 2, minOrders = 2 } = {}) {
+  if (!productIds?.length) return [];
+  const marks = productIds.map(() => '?').join(',');
+  return db
+    .prepare(
+      `SELECT p.*, COUNT(DISTINCT other.order_id) AS n
+         FROM order_items seed
+         JOIN order_items other ON other.order_id = seed.order_id AND other.product_id != seed.product_id
+         JOIN products p ON p.id = other.product_id
+         JOIN orders o ON o.id = seed.order_id AND o.status IN (${PAID_SQL})
+        WHERE seed.product_id IN (${marks}) AND other.product_id NOT IN (${marks}) AND p.in_stock = 1
+        GROUP BY p.id
+       HAVING n >= ?
+        ORDER BY n DESC, p.sort_order
+        LIMIT ?`,
+    )
+    .all(...productIds, ...productIds, minOrders, limit);
 }
 
 const PRODUCT_FIELDS = [

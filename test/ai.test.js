@@ -57,8 +57,8 @@ test('an understood order is confirmed before anything goes into the cart', () =
   const confirm = c.sayUnderstood('Bonjour, 2 tas moyens de tomates et un petit gingembre, et du safran', nlu).last;
   assert.equal(c.state(), 'NLU_CONFIRM');
   assert.match(confirm.body, /J’ai compris :/);
-  assert.match(confirm.body, /🍅 Tomate — Moyen tas × 2 — 4 000 FC/);
-  assert.match(confirm.body, /🫚 Gingembre — Petit tas × 1/);
+  assert.match(confirm.body, /\*2×\* 🍅 Tomate · Moyen tas — 4 000 FC/);
+  assert.match(confirm.body, /\*1×\* 🫚 Gingembre · Petit tas/);
   assert.match(confirm.body, /pas trouvé dans notre catalogue : safran/);
   assert.deepEqual(optionIds(confirm), ['nlu:yes', 'nlu:no']);
 
@@ -71,7 +71,7 @@ test('"no" falls back to the catalogue; a typed correction replaces the proposal
   const c = customer('243860000002');
   c.sayUnderstood('je veux des tomates', { items: [{ productId: 1, size: 'medium', qty: 1 }], unknown: [] });
   c.sayUnderstood('non plutôt 3 grands tas de tomates', { items: [{ productId: 1, size: 'large', qty: 3 }], unknown: [] });
-  assert.match(c.state() === 'NLU_CONFIRM' && c.say('oui').last.body, /Tomate — Grand tas × 3/);
+  assert.match(c.state() === 'NLU_CONFIRM' && c.say('oui').last.body, /\*3×\* 🍅 Tomate · Grand tas/);
 
   const d = customer('243860000003');
   d.sayUnderstood('du piment svp', { items: [{ productId: 2, size: 'medium', qty: 1 }], unknown: [] });

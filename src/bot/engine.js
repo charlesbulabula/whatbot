@@ -25,6 +25,7 @@ export const STATES = Object.freeze({
   MENU: 'MENU',
   DUPLICATE_CHECK: 'DUPLICATE_CHECK',
   WAITLIST_OFFER: 'WAITLIST_OFFER',
+  PICK_AISLE: 'PICK_AISLE',
   PICK_PRODUCT: 'PICK_PRODUCT',
   PICK_SIZE: 'PICK_SIZE',
   PICK_QTY: 'PICK_QTY',
@@ -49,6 +50,12 @@ export const STATES = Object.freeze({
 });
 
 const IDLE = new Set([STATES.WELCOME, STATES.DONE]);
+// Marks "the products the shop filed under no aisle", which is a real choice
+// and must not read as "no aisle chosen yet".
+const NO_AISLE = '\u0000none';
+// A thin rule: WhatsApp has no tables, and a blank line is not enough to
+// separate what you bought from what you owe.
+const RULE = '──────────';
 
 /** States in which a customer who goes quiet gets one "still there?" nudge. */
 export const REMINDABLE_STATES = [
@@ -346,6 +353,7 @@ function cartText(s) {
   return [
     tr(s, 'cartTitle'),
     ...lines.map((l) => `• ${cart.describeItem(s.locale, l.product, l.size, l.qty, l.extras)} — ${fmt(s, l.lineTotal)}`),
+    RULE,
     tr(s, 'subtotalLine', { amount: fmt(s, subtotal) }),
   ].join('\n');
 }
@@ -938,12 +946,21 @@ const HANDLERS = {
 
   [STATES.PICK_PRODUCT]: {
     enter(s, intro) {
-      const products = db.listProducts();
-      if (!products.length) {
+      const all = db.listProducts();
+      if (!all.length) {
         s.state = STATES.DONE;
         s.ctx = {};
         return say(s, join(intro, tr(s, 'noProducts')));
       }
+      // Past ten products a flat list degrades to numbered text. Walking the
+      // aisles first keeps it tappable however big the shop grows.
+      const aisles = [...new Set(all.map((p) => p.category).filter(Boolean))];
+      if (!s.ctx.aisle && aisles.length > 1 && all.length > M.LIST_ROWS_MAX) {
+        return go(s, STATES.PICK_AISLE, intro);
+      }
+      const products = !s.ctx.aisle
+        ? all
+        : all.filter((p) => (s.ctx.aisle === NO_AISLE ? !p.category : p.category === s.ctx.aisle));
       const options = products.map((p) => ({
         id: `p:${p.id}`,
         title: productName(p, s.locale),
@@ -952,6 +969,7 @@ const HANDLERS = {
         group: p.category || null,
       }));
       const hasCart = s.ctx.cart?.length > 0;
+      if (s.ctx.aisle) options.push({ id: 'aisle:all', title: tr(s, 'btnAllAisles') });
       if (hasCart) options.push({ id: 'cart:checkout', title: tr(s, 'btnCheckoutCart') });
 
       const shop = settings.get();
@@ -977,6 +995,10 @@ const HANDLERS = {
     handle(s, input) {
       const id = pick(s, input);
       if (id === 'cart:checkout') return goCheckout(s);
+      if (id === 'aisle:all') {
+        s.ctx.aisle = null;
+        return go(s, STATES.PICK_AISLE);
+      }
       if (id?.startsWith('p:')) {
         const product = db.getProduct(Number(id.slice(2)));
         if (!product?.in_stock) {
@@ -988,6 +1010,41 @@ const HANDLERS = {
       }
       if (input.nlu) return startUnderstoodOrder(s, input.nlu);
       reprompt(s, tr(s, 'invalidChoice'));
+    },
+  },
+
+  // Shown only when the catalogue outgrows a single list: pick the shelf first.
+  [STATES.PICK_AISLE]: {
+    enter(s, intro) {
+      const products = db.listProducts();
+      const counts = new Map();
+      for (const p of products) {
+        const key = p.category || '';
+        counts.set(key, (counts.get(key) || 0) + 1);
+      }
+      const options = [...counts.entries()]
+        .filter(([key]) => key)
+        .map(([key, n]) => ({ id: `aisle:${key}`, title: key, description: tr(s, 'aisleCount', { n }) }));
+      // Products with no aisle would otherwise be unreachable from here.
+      if (counts.get('')) {
+        options.push({ id: 'aisle:', title: tr(s, 'aisleOther'), description: tr(s, 'aisleCount', { n: counts.get('') }) });
+      }
+      if (s.ctx.cart?.length) options.push({ id: 'cart:checkout', title: tr(s, 'btnCheckoutCart') });
+      offer(s, join(intro, tr(s, 'pickAisle')), options, {
+        buttonLabel: tr(s, 'catalogButton'),
+        header: tr(s, 'catalogHeaderLine'),
+      });
+    },
+    handle(s, input) {
+      const id = pick(s, input);
+      if (id === 'cart:checkout') return goCheckout(s);
+      if (!id?.startsWith('aisle:')) return reprompt(s, tr(s, 'invalidChoice'));
+      const aisle = id.slice('aisle:'.length);
+      s.ctx.aisle = aisle || null;
+      // An empty aisle name means "the ones with no aisle": mark it so
+      // PICK_PRODUCT does not send us straight back here.
+      if (!aisle) s.ctx.aisle = NO_AISLE;
+      return go(s, STATES.PICK_PRODUCT);
     },
   },
 
@@ -1081,14 +1138,33 @@ const HANDLERS = {
 
   [STATES.ADD_MORE]: {
     enter(s, intro) {
-      offer(s, join(intro, cartText(s), tr(s, 'addMorePrompt')), [
+      // One suggestion, drawn from what this shop's customers actually buy
+      // together. Never invented, never more than one: a nag is not a service.
+      const inCart = [...new Set((s.ctx.cart || []).map((it) => it.productId))];
+      const [suggestion] = db.boughtTogether(inCart, { limit: 1 });
+      const options = [
         { id: 'more:add', title: tr(s, 'btnAddMore') },
         { id: 'more:checkout', title: tr(s, 'btnCheckout') },
         { id: 'more:edit', title: tr(s, 'btnEditCart') },
-      ]);
+      ];
+      if (suggestion) {
+        options.unshift({ id: `p:${suggestion.id}`, title: productName(suggestion, s.locale) });
+      }
+      const nudge = suggestion
+        ? tr(s, 'oftenWith', { product: productName(suggestion, s.locale) })
+        : null;
+      offer(s, join(intro, cartText(s), nudge, tr(s, 'addMorePrompt')), options);
     },
     handle(s, input) {
       const id = pick(s, input) || (isYes(input) ? 'more:add' : isNo(input) ? 'more:checkout' : null);
+      // Tapping the suggestion goes straight to its size, skipping the catalogue.
+      if (id?.startsWith('p:')) {
+        const product = db.getProduct(Number(id.slice(2)));
+        if (product?.in_stock) {
+          s.ctx.pending = { productId: product.id };
+          return go(s, STATES.PICK_SIZE);
+        }
+      }
       if (id === 'more:add') return go(s, STATES.PICK_PRODUCT);
       if (id === 'more:checkout') return goCheckout(s);
       if (id === 'more:edit') return go(s, STATES.EDIT_CART);
@@ -1288,14 +1364,14 @@ const HANDLERS = {
       const lines = [
         tr(s, 'recapTitle'),
         ...priced.lines.map((l) => `• ${cart.describeItem(s.locale, l.product, l.size, l.qty, l.extras)} — ${fmt(s, l.lineTotal)}`),
-        '',
+        RULE,
         tr(s, 'subtotalLine', { amount: fmt(s, totals.subtotal) }),
         totals.deliveryFee ? tr(s, 'deliveryFeeLine', { amount: fmt(s, totals.deliveryFee) }) : null,
         tierPerk(s, totals),
         coupon ? tr(s, 'couponLine', { code: coupon.code, amount: fmt(s, totals.couponDiscount) }) : null,
         totals.discount ? tr(s, 'discountLine', { amount: fmt(s, totals.discount) }) : null,
         tr(s, 'totalLine', { amount: fmt(s, totals.total) }),
-        '',
+        RULE,
         tr(s, 'deliveryTo', { name: d.name, zone: d.zone, note: d.note }),
         s.ctx.slot ? tr(s, 'deliverySlotLine', { slot: s.ctx.slot.label }) : null,
       ].filter((l) => l !== null);

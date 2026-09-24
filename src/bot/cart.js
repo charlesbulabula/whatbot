@@ -95,10 +95,13 @@ function labelOf(locale, productLike, size) {
   return variantLabel(variantOf(product, size), locale);
 }
 
-/** "🍅 Tomate — Moyen tas (préparé) × 2" */
+/**
+ * One basket line. The quantity leads: three em-dashes in a row read like a
+ * receipt, and the number is what the eye looks for first.
+ */
 export function describeItem(locale, product, size, qty, extras = []) {
   const add = extrasLabel(extras.map((e) => ({ label: e.label })));
-  return `${productName(product, locale)} — ${labelOf(locale, product, size)}${add ? ` (${add})` : ''} × ${qty}`;
+  return `*${qty}×* ${productName(product, locale)} · ${labelOf(locale, product, size)}${add ? ` (${add})` : ''}`;
 }
 
 /** Compact form used in "your last order was…" lines. */

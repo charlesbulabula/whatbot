@@ -50,7 +50,7 @@ test('full order: catalogue → size → quantity → address → recap → paym
   assert.deepEqual(optionIds(qty), ['qty:1', 'qty:2', 'qty:3']);
 
   const more = c.say('2').last; // typed quantity
-  assert.match(more.body, /Ajouté : 🍅 Tomate — Moyen tas × 2/);
+  assert.match(more.body, /Ajouté : \*2×\* 🍅 Tomate · Moyen tas/);
   assert.match(more.body, /Sous-total : \*4 000 FC\*/);
 
   const name = c.tap('more:checkout').last;
@@ -133,7 +133,7 @@ test('a returning customer skips the address step and can repeat the last order'
   assert.match(confirm.body, /Livrer à \*Mama Nzinga\*, Gombe/);
 
   const recap = c.tap('addr:yes').last;
-  assert.match(recap.body, /Gingembre — Grand tas × 1/);
+  assert.match(recap.body, /\*1×\* 🫚 Gingembre · Grand tas/);
   assert.match(recap.body, /\*Total : 5 500 FC\*/);
 });
 
@@ -301,6 +301,67 @@ test('the catalogue is grouped into aisles once the shop fills them in', async (
 
   db.updateProduct(products[0].id, { category: null });
   db.updateProduct(products[1].id, { category: null });
+});
+
+test('a big catalogue is walked aisle by aisle, never as numbered text', async () => {
+  const db = await import('../src/db/index.js');
+  const made = [];
+  // Past ten products a flat list would degrade to a numbered wall of text.
+  for (let i = 0; i < 8; i += 1) {
+    made.push(db.createProduct({
+      name_fr: `Test ${i}`, name_en: `Test ${i}`, emoji: '🧪',
+      price_small: 500, price_medium: 1000, price_large: 1500,
+      category: i % 2 ? 'Épices' : 'Légumes', sort_order: 100 + i,
+    }));
+  }
+  try {
+    const c = customer('243810000041');
+    c.say('Bonjour');
+    const aisles = c.tap('menu:order').last;
+    assert.equal(c.state(), 'PICK_AISLE', 'the shelf comes before the product');
+    assert.notEqual(aisles.kind, 'text', 'never a numbered wall of text');
+    const titlesOf = (m) => (m.rows || m.buttons || []).map((r) => r.title);
+    assert.ok(titlesOf(aisles).includes('Épices'));
+    assert.ok(titlesOf(aisles).includes('Autres produits'), 'products with no aisle stay reachable');
+
+    // Inside an aisle, only its products, plus a way back out.
+    const inside = c.tap('aisle:Épices').last;
+    assert.equal(c.state(), 'PICK_PRODUCT');
+    assert.equal(titlesOf(inside).filter((x) => x.includes('Test')).length, 4, 'only this aisle');
+    assert.ok(titlesOf(inside).some((x) => x.includes('Tous les rayons')));
+
+    c.tap('aisle:all');
+    assert.equal(c.state(), 'PICK_AISLE', 'and the way back works');
+  } finally {
+    made.forEach((p) => db.deleteProduct(p.id));
+  }
+});
+
+test('the cart suggests what this shop’s customers really buy together', async () => {
+  const db = await import('../src/db/index.js');
+  const [tomato, chili] = db.listProducts();
+
+  // Two paid orders where the two go together: that is the whole evidence.
+  for (const phone of ['243810000050', '243810000051']) {
+    const { customer } = db.touchCustomer(phone);
+    const order = db.createOrder({
+      customer: db.getCustomerById(customer.id),
+      items: [
+        { productId: tomato.id, size: 'medium', quantity: 1, unitPrice: tomato.price_medium },
+        { productId: chili.id, size: 'medium', quantity: 1, unitPrice: chili.price_medium },
+      ],
+      subtotal: 3000, deliveryFee: 2000, discount: 0, total: 5000,
+      paymentMethod: 'momo', name: 'X', neighborhood: 'Gombe', addressNote: '',
+    });
+    db.setOrderStatus(order.id, 'paid');
+  }
+
+  const paired = db.boughtTogether([tomato.id], { limit: 1, minOrders: 2 });
+  assert.equal(paired.length, 1, 'two orders are enough evidence, one is not');
+  assert.equal(paired[0].id, chili.id);
+
+  // A product nobody pairs with anything suggests nothing.
+  assert.deepEqual(db.boughtTogether([db.listProducts().at(-1).id], { minOrders: 2 }), []);
 });
 
 test('a shared location is accepted as the delivery address', () => {

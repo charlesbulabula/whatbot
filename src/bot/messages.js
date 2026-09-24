@@ -4,7 +4,7 @@
 // WhatsApp interactive limits.
 const BUTTON_MAX = 3;
 const BUTTON_TITLE_MAX = 20;
-const LIST_ROWS_MAX = 10;
+export const LIST_ROWS_MAX = 10;
 const LIST_SECTION_MAX = 24;
 const LIST_TITLE_MAX = 24;
 const LIST_DESC_MAX = 72;
