@@ -28,6 +28,7 @@ export function productsPage(L, locale, { products, lowStock = [], flash, theme 
 <td><input ${f} name="emoji" value="${esc(p.emoji)}" size="2" aria-label="${esc(L.emoji)}"></td>
 <td><input ${f} name="name_fr" value="${esc(p.name_fr)}" size="11" aria-label="${esc(L.nameFr)}" required></td>
 <td><input ${f} name="name_en" value="${esc(p.name_en)}" size="11" aria-label="${esc(L.nameEn)}" required></td>
+<td><input ${f} name="category" value="${esc(p.category || '')}" size="9" list="aisles" placeholder="${esc(L.categoryNone)}" aria-label="${esc(L.category)}"></td>
 <td class="num"><input ${f} type="number" name="price_small" value="${p.price_small}" min="0" aria-label="${esc(L.priceSmall)}" required></td>
 <td class="num"><input ${f} type="number" name="price_medium" value="${p.price_medium}" min="0" aria-label="${esc(L.priceMedium)}" required></td>
 <td class="num"><input ${f} type="number" name="price_large" value="${p.price_large}" min="0" aria-label="${esc(L.priceLarge)}" required></td>
@@ -48,7 +49,7 @@ ${iconPost(`/admin/products/${p.id}/delete`, 'trash', L.delete, { tone: 'danger'
 
   const list = products.length
     ? table([
-      '', L.nameFr, L.nameEn,
+      '', L.nameFr, L.nameEn, L.category,
       { label: L.priceSmall, num: true }, { label: L.priceMedium, num: true }, { label: L.priceLarge, num: true },
       { label: L.stockQty, num: true }, { label: L.stockAlert, num: true }, { label: L.order, num: true },
       L.stock, '',
@@ -59,6 +60,7 @@ ${iconPost(`/admin/products/${p.id}/delete`, 'trash', L.delete, { tone: 'danger'
 <div class="field"><label for="n-emoji">${esc(L.emoji)}</label><input id="n-emoji" name="emoji" size="2"></div>
 <div class="field"><label for="n-fr">${esc(L.nameFr)}</label><input id="n-fr" name="name_fr" required></div>
 <div class="field"><label for="n-en">${esc(L.nameEn)}</label><input id="n-en" name="name_en" required></div>
+<div class="field"><label for="n-cat">${esc(L.category)}</label><input id="n-cat" name="category" list="aisles" placeholder="${esc(L.categoryNone)}"></div>
 <div class="field"><label for="n-s">${esc(L.priceSmall)}</label><input id="n-s" type="number" name="price_small" min="0" required></div>
 <div class="field"><label for="n-m">${esc(L.priceMedium)}</label><input id="n-m" type="number" name="price_medium" min="0" required></div>
 <div class="field"><label for="n-l">${esc(L.priceLarge)}</label><input id="n-l" type="number" name="price_large" min="0" required></div>
@@ -69,7 +71,10 @@ ${iconPost(`/admin/products/${p.id}/delete`, 'trash', L.delete, { tone: 'danger'
     ? alert(`<b>${esc(L.lowStockTitle)}</b> — ${lowStock.map((p) => esc(locale === 'en' ? p.name_en : p.name_fr)).join(', ')}`, 'warning', 'package')
     : '';
 
-  const body = `${tabs(CATALOGUE_TABS(L), 'products')}${warn}
+  const aisles = [...new Set(products.map((p) => p.category).filter(Boolean))].sort();
+  const datalist = `<datalist id="aisles">${aisles.map((a) => `<option value="${esc(a)}">`).join('')}</datalist>`;
+
+  const body = `${datalist}${tabs(CATALOGUE_TABS(L), 'products')}${warn}
 <p class="muted">${esc(L.stockHint)}</p>
 <div hidden>${forms}</div>${list}${section(L.addProduct, add)}`;
   return layout(L, { role, waHealth, title: L.products, active: 'products', body, flash, theme });

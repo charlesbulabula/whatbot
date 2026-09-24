@@ -34,6 +34,7 @@ export default {
 
   pickProduct: 'Here are today’s products. Pick one:',
   catalogButton: 'See catalogue',
+  catalogHeaderLine: '🧺 Today’s stall',
   priceRange: (p) => `${p.from} to ${p.to}`,
   btnCheckoutCart: '✅ Checkout',
   noProducts: 'Sorry, everything is sold out right now. Please come back a bit later 🙏',

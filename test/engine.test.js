@@ -277,6 +277,32 @@ test('free text at the menu is answered instead of refused', () => {
   assert.equal(e.state(), 'MENU');
 });
 
+test('the catalogue is grouped into aisles once the shop fills them in', async () => {
+  const db = await import('../src/db/index.js');
+  const products = db.listProducts();
+  db.updateProduct(products[0].id, { category: 'Légumes' });
+  db.updateProduct(products[1].id, { category: 'Épices' });
+
+  const c = customer('243810000040');
+  c.say('Bonjour');
+  const menu = c.tap('menu:order').last;
+
+  assert.equal(menu.kind, 'list', 'aisles are worth a list even with few items');
+  assert.ok(menu.header, 'the shelf has a sign');
+  const titles = menu.sections.map((s) => s.title);
+  assert.ok(titles.includes('Légumes'), 'the aisle is a section');
+  assert.ok(titles.includes('Épices'));
+  // Products left without an aisle still appear, in an unnamed block.
+  assert.ok(menu.sections.some((s) => !s.title && s.rows.length));
+
+  // Every product is still reachable, none lost in the grouping.
+  const rows = menu.sections.flatMap((s) => s.rows).length;
+  assert.equal(rows, menu.rows.length);
+
+  db.updateProduct(products[0].id, { category: null });
+  db.updateProduct(products[1].id, { category: null });
+});
+
 test('a shared location is accepted as the delivery address', () => {
   const c = customer('243810000011');
   c.say('Bonjour');
@@ -420,3 +446,4 @@ test('a menu button tapped while a payment is pending lets the customer move on'
   c.image('later-proof');
   assert.equal(db.getOrder(orderId).payment_proof, 'later-proof');
 });
+

@@ -48,16 +48,16 @@ function toPayload(msg) {
         type: 'interactive',
         interactive: {
           type: 'list',
+          ...(msg.header && { header: { type: 'text', text: msg.header } }),
           body: { text: msg.body },
           ...(msg.footer && { footer: { text: msg.footer } }),
           action: {
             button: msg.button,
-            sections: [
-              {
-                title: msg.button,
-                rows: msg.rows.map((r) => ({ id: r.id, title: r.title, ...(r.description && { description: r.description }) })),
-              },
-            ],
+            // Named sections when the options carry an aisle; one block otherwise.
+            sections: (msg.sections || [{ title: msg.button, rows: msg.rows }]).map((s) => ({
+              ...(s.title && { title: s.title }),
+              rows: s.rows.map((r) => ({ id: r.id, title: r.title, ...(r.description && { description: r.description }) })),
+            })),
           },
         },
       };

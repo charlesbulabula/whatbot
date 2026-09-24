@@ -572,6 +572,8 @@ const productFields = (b) => ({
   price_small: toInt(b.price_small),
   price_medium: toInt(b.price_medium),
   price_large: toInt(b.price_large),
+  // Empty means "no aisle": the list stays flat rather than growing a blank one.
+  category: str(b.category, 24) || null,
 });
 
 adminRouter.get('/products', (req, res) => {

@@ -27,6 +27,7 @@ const ADDED_COLUMNS = [
   ['products', 'stock_alert', 'INTEGER NOT NULL DEFAULT 0'],
   ['products', 'photo', 'TEXT'],
   ['products', 'retailer_id', 'TEXT'],
+  ['products', 'category', 'TEXT'], // the aisle it belongs to, for grouped menus
   ['customers', 'tier', "TEXT NOT NULL DEFAULT 'bronze'"],
   ['orders', 'slot_id', 'INTEGER'],
   ['orders', 'slot_label', 'TEXT'],
@@ -158,7 +159,7 @@ export function createProduct(p) {
 
 const PRODUCT_FIELDS = [
   'name_fr', 'name_en', 'emoji', 'price_small', 'price_medium', 'price_large',
-  'in_stock', 'sort_order', 'stock_qty', 'stock_alert', 'photo', 'retailer_id',
+  'in_stock', 'sort_order', 'stock_qty', 'stock_alert', 'photo', 'retailer_id', 'category',
 ];
 
 export function updateProduct(id, p) {

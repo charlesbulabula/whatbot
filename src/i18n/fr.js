@@ -35,6 +35,7 @@ export default {
 
   pickProduct: 'Voici nos produits du jour. Choisissez-en un :',
   catalogButton: 'Voir le catalogue',
+  catalogHeaderLine: '🧺 Notre étal du jour',
   priceRange: (p) => `de ${p.from} à ${p.to}`,
   btnCheckoutCart: '✅ Valider le panier',
   noProducts: 'Désolé, tous nos produits sont épuisés pour le moment. Revenez un peu plus tard 🙏',

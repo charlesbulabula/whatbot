@@ -5,6 +5,7 @@
 const BUTTON_MAX = 3;
 const BUTTON_TITLE_MAX = 20;
 const LIST_ROWS_MAX = 10;
+const LIST_SECTION_MAX = 24;
 const LIST_TITLE_MAX = 24;
 const LIST_DESC_MAX = 72;
 const BODY_MAX = 1024;
@@ -26,18 +27,42 @@ export const buttons = (to, body, options, footer) => ({
   buttons: options.map((o) => ({ id: o.id, title: clip(o.title, BUTTON_TITLE_MAX) })),
 });
 
-export const list = (to, body, buttonLabel, options, footer) => ({
-  kind: 'list',
-  to,
-  body: clip(body, BODY_MAX),
-  footer: footer ? clip(footer, 60) : undefined,
-  button: clip(buttonLabel, 20),
-  rows: options.map((o) => ({
-    id: o.id,
-    title: clip(o.title, LIST_TITLE_MAX),
-    description: o.description ? clip(o.description, LIST_DESC_MAX) : undefined,
-  })),
+const row = (o) => ({
+  id: o.id,
+  title: clip(o.title, LIST_TITLE_MAX),
+  description: o.description ? clip(o.description, LIST_DESC_MAX) : undefined,
 });
+
+/**
+ * A list message. `options` may carry a `group` per option: WhatsApp then draws
+ * named sections instead of one undifferentiated block, which is the difference
+ * between scanning a shelf and reading a receipt.
+ */
+export const list = (to, body, buttonLabel, options, footer, header) => {
+  const groups = [...new Set(options.map((o) => o.group).filter(Boolean))];
+  const sections = groups.length
+    ? [
+      ...groups.map((title) => ({
+        title: clip(title, LIST_SECTION_MAX),
+        rows: options.filter((o) => o.group === title).map(row),
+      })),
+      // Anything without an aisle still has to appear somewhere.
+      ...(options.some((o) => !o.group)
+        ? [{ rows: options.filter((o) => !o.group).map(row) }]
+        : []),
+    ]
+    : null;
+  return {
+    kind: 'list',
+    to,
+    header: header ? clip(header, 60) : undefined,
+    body: clip(body, BODY_MAX),
+    footer: footer ? clip(footer, 60) : undefined,
+    button: clip(buttonLabel, 20),
+    rows: options.map(row),
+    sections,
+  };
+};
 
 /** A picture, e.g. a product photo sent with the size question. */
 export const image = (to, link, caption) => ({ kind: 'image', to, link, caption: caption ? clip(caption, 900) : undefined });
@@ -60,10 +85,13 @@ export const template = (to, name, language, params = []) => ({ kind: 'template'
  * reply buttons (<=3 short titles), a list (<=10 rows), or numbered text.
  * Customers can always answer by number or by typing the option's name.
  */
-export function choice(to, body, options, { buttonLabel, footer, numberHint }) {
-  const fitsButtons = options.length <= BUTTON_MAX && options.every((o) => chars(o.title).length <= BUTTON_TITLE_MAX);
+export function choice(to, body, options, { buttonLabel, footer, header, numberHint }) {
+  // Grouped options deserve a list even when few: the aisles are the point.
+  const grouped = options.some((o) => o.group);
+  const fitsButtons = !grouped && options.length <= BUTTON_MAX
+    && options.every((o) => chars(o.title).length <= BUTTON_TITLE_MAX);
   if (fitsButtons) return buttons(to, body, options, footer);
-  if (options.length <= LIST_ROWS_MAX) return list(to, body, buttonLabel, options, footer);
+  if (options.length <= LIST_ROWS_MAX) return list(to, body, buttonLabel, options, footer, header);
   const lines = options.map((o, i) => `*${i + 1}.* ${o.title}${o.description ? ` — ${o.description}` : ''}`);
   return text(to, `${body}\n\n${lines.join('\n')}\n\n${numberHint}`);
 }

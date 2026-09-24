@@ -40,6 +40,7 @@ export default {
 
   pickProduct: 'Tala biloko ya lelo. Pona moko :',
   catalogButton: 'Tala catalogue',
+  catalogHeaderLine: '🧺 Biloko ya lelo',
   priceRange: (p) => `banda ${p.from} kino ${p.to}`,
   btnCheckoutCart: '✅ Kokokisa panier',
   noProducts: 'Pardon, biloko nyonso esili mpo na sikoyo. Zonga mwa moke 🙏',

@@ -247,7 +247,7 @@ function reprompt(s, intro) {
 const INTERACTIVE_BODY_MAX = 1024;
 
 /** Sends a set of options and remembers them so a typed number or name can be matched later. */
-function offer(s, body, options, { buttonLabel, footer } = {}) {
+function offer(s, body, options, { buttonLabel, footer, header } = {}) {
   s.ctx.options = options.map((o) => ({ id: o.id, title: o.title }));
   // Interactive bodies are capped at 1024 chars: send long content (e.g. a big recap)
   // as plain text first, and keep only the final question on the interactive message.
@@ -261,6 +261,7 @@ function offer(s, body, options, { buttonLabel, footer } = {}) {
     M.choice(s.phone, body, options, {
       buttonLabel: buttonLabel || tr(s, 'listButton'),
       footer,
+      header,
       numberHint: tr(s, 'replyWithNumber'),
     }),
   );
@@ -947,6 +948,8 @@ const HANDLERS = {
         id: `p:${p.id}`,
         title: productName(p, s.locale),
         description: priceRangeLabel(s, p),
+        // Groups the list into aisles when the shop has filled them in.
+        group: p.category || null,
       }));
       const hasCart = s.ctx.cart?.length > 0;
       if (hasCart) options.push({ id: 'cart:checkout', title: tr(s, 'btnCheckoutCart') });
@@ -968,6 +971,7 @@ const HANDLERS = {
 
       offer(s, join(intro, hasCart ? cartText(s) : null, tr(s, 'pickProduct')), options, {
         buttonLabel: tr(s, 'catalogButton'),
+        header: tr(s, 'catalogHeaderLine'),
       });
     },
     handle(s, input) {
