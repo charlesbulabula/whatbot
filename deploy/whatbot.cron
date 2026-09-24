@@ -1,3 +1,8 @@
 # Daily backup of the WhatsApp bot database at 03:15, 14 days kept in /opt/whatbot/data/backups.
 # Installed by deploy/deploy.sh.
 15 3 * * * whatbot cd /opt/whatbot && /usr/bin/env node src/db/backup.js >> /opt/whatbot/data/backup.log 2>&1
+
+# Supervision: every 5 minutes, outside the app, so it still speaks when the
+# app is dead. Alerts by e-mail on a change of state, and every 6 hours while
+# a problem lasts. Installed by deploy/deploy.sh.
+*/5 * * * * whatbot cd /opt/whatbot && /usr/bin/env node deploy/watchdog.js >> /opt/whatbot/data/watchdog.log 2>&1
