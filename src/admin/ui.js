@@ -344,9 +344,16 @@ function busy(){var a=document.activeElement;return dirty||(a&&/INPUT|TEXTAREA|S
 function show(text,clickable){toast.textContent=text;toast.hidden=false;toast.classList.toggle('toast--action',!!clickable);
 if(!clickable){clearTimeout(toast._t);toast._t=setTimeout(function(){toast.hidden=true},6000);}}
 toast.addEventListener('click',function(){if(pending)location.reload()});
-function refresh(){if(busy()){pending=true;show(T.pending,true);return;}location.reload();}
+// The message has to outlive the reload it triggers. Shown before, it lasted
+// 1.5s and died with the page; carried across, it describes what is now on
+// screen, which is what the reader needs anyway.
+var KEY='live-toast';
+function carry(text){try{sessionStorage.setItem(KEY,text)}catch(_){}}
+try{var kept=sessionStorage.getItem(KEY);if(kept){sessionStorage.removeItem(KEY);show(kept,false)}}catch(_){}
+var last='';
+function refresh(){if(busy()){pending=true;show(T.pending,true);return;}carry(last);location.reload();}
 function onUpdate(e){var d={};try{d=JSON.parse(e.data)}catch(_){}
-show(T[d.type]||T.changed,false);clearTimeout(timer);timer=setTimeout(refresh,1500);}
+last=T[d.type]||T.changed;show(last,false);clearTimeout(timer);timer=setTimeout(refresh,1500);}
 if(window.EventSource){var es=new EventSource('/admin/events');es.addEventListener('update',onUpdate);
 es.addEventListener('error',function(){});}
 else{setInterval(function(){if(!busy())location.reload()},${fallbackSeconds * 1000});}

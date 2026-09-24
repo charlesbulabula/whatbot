@@ -482,3 +482,11 @@ test('the win-back button reaches a customer, or says plainly why it cannot', as
   const stale = { ...db.getCustomerById(customer.id), last_seen_at: '2020-01-01 00:00:00' };
   assert.equal(await winbackOne(stale), 'skipped');
 });
+
+test('the live bubble outlives the reload it triggers', async () => {
+  const html = await (await get('/admin')).text();
+  // Shown then reloaded away, it lasted 1.5s and nobody ever saw it.
+  assert.match(html, /sessionStorage\.setItem\(KEY/, 'the message is carried across');
+  assert.match(html, /carry\(last\);location\.reload\(\)/, 'carried before reloading, not after');
+  assert.match(html, /sessionStorage\.getItem\(KEY\)/, 'and shown again on the new page');
+});
