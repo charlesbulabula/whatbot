@@ -181,9 +181,35 @@ const EXTENSIONS = { 'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '.
  * a few weeks, and the proof must stay available for accounting disputes.
  * Returns the file path, or null when WhatsApp is disabled (dev/tests).
  */
+/**
+ * Keeps the screenshot on our own disk.
+ *
+ * On WhatsApp the proof is a media id to resolve; on Messenger and Instagram it
+ * is a link that expires, which makes downloading it straight away the whole
+ * point rather than an optimisation.
+ */
+// A screenshot is a media id on WhatsApp and a link on Messenger and Instagram.
+// The prefix says which, so the database did not have to change.
+export const PROOF_URL_PREFIX = 'url:';
+
+/** Fetches a media link, as Messenger and Instagram hand them over. */
+async function downloadUrl(url) {
+  const res = await fetch(url, { signal: AbortSignal.timeout(20_000) });
+  if (!res.ok) throw new Error(`Media download failed: ${res.status}`);
+  return {
+    contentType: (res.headers.get('content-type') || '').split(';')[0],
+    buffer: Buffer.from(await res.arrayBuffer()),
+  };
+}
+
 export async function storeProof(order) {
-  if (!order?.payment_proof || !config.whatsapp.enabled || config.dbPath === ':memory:') return null;
-  const { contentType, buffer } = await downloadMedia(order.payment_proof);
+  if (!order?.payment_proof || config.dbPath === ':memory:') return null;
+  const ref = String(order.payment_proof);
+  const fromUrl = ref.startsWith(PROOF_URL_PREFIX);
+  if (!fromUrl && !config.whatsapp.enabled) return null;
+  const { contentType, buffer } = fromUrl
+    ? await downloadUrl(ref.slice(PROOF_URL_PREFIX.length))
+    : await downloadMedia(ref);
   const dir = path.join(path.dirname(config.dbPath), 'proofs');
   fs.mkdirSync(dir, { recursive: true });
   const file = path.join(dir, `${order.reference}${EXTENSIONS[contentType] || '.bin'}`);

@@ -57,10 +57,23 @@ sait pas rendre n'est jamais tronqué en silence.
 numéro de téléphone. Le lien pointe vers `m.me` ou `ig.me`, et une pastille
 indique le canal — seulement hors WhatsApp, puisque WhatsApp est la norme ici.
 
+## Les captures de paiement
+
+Elles fonctionnent sur les trois canaux. WhatsApp livre un identifiant de
+média, Messenger et Instagram un **lien qui expire** — la capture est donc
+téléchargée et rangée sur le disque **immédiatement**, ce qui n'est pas une
+optimisation mais la condition pour ne pas la perdre.
+
+En base, la référence porte son type : un identifiant nu pour WhatsApp,
+`url:https://…` pour les deux autres. Aucune colonne ajoutée.
+
+Conséquence à connaître : si le téléchargement échoue au moment de la
+réception, la capture Messenger est **définitivement perdue** — contrairement à
+WhatsApp, où l'identifiant reste résoluble. Le tableau de bord affiche alors
+une page 404 honnête plutôt qu'une erreur technique.
+
 ## Ce qui reste à faire
 
-- **Les captures de paiement** arrivent sur Messenger comme une URL, non comme
-  un identifiant de média : le téléchargement côté serveur reste à écrire.
 - **Les commentaires** sous les publications ne sont pas traités — seuls les
   messages privés le sont.
 - **Les stories** ne sont pas publiées par le bot ; l'API Instagram le permet

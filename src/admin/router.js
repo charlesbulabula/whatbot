@@ -8,7 +8,7 @@ import { logger } from '../utils/logger.js';
 import * as db from '../db/index.js';
 import { sendError } from '../errors.js';
 import { DEFAULT_LOCALE, normalizeLocale, t } from '../i18n/index.js';
-import { changeOrderStatus, ORDER_STATUSES, storeProof } from '../bot/orders.js';
+import { changeOrderStatus, ORDER_STATUSES, storeProof, PROOF_URL_PREFIX } from '../bot/orders.js';
 import { downloadMedia, send } from '../whatsapp/client.js';
 import { inServiceWindow } from '../bot/notify.js';
 import { winbackOne } from '../jobs/scheduler.js';
@@ -500,15 +500,18 @@ adminRouter.post('/orders/:id/status', async (req, res) => {
 // Only proofs attached to an order can be fetched, never arbitrary media ids.
 adminRouter.get('/orders/:id/proof', async (req, res) => {
   const order = db.getOrder(Number(req.params.id));
-  if (!order?.payment_proof) return res.status(404).send('No proof');
+  if (!order?.payment_proof) return sendError(req, res, 404);
   try {
     const file = order.payment_proof_file || (await storeProof(order));
     if (file) return res.set('Cache-Control', 'private, max-age=86400').sendFile(file);
+    // No local copy: only a WhatsApp media id can still be fetched on demand.
+    // A Messenger link expires, so if storeProof could not keep it, it is gone.
+    if (String(order.payment_proof).startsWith(PROOF_URL_PREFIX)) return sendError(req, res, 404);
     const { contentType, buffer } = await downloadMedia(order.payment_proof);
     res.set('Content-Type', contentType || 'application/octet-stream').set('Cache-Control', 'private, max-age=3600').send(buffer);
   } catch (err) {
     logger.error('Proof download failed:', err.message);
-    res.status(502).send(`Could not fetch the image from WhatsApp: ${err.message}`);
+    sendError(req, res, 502);
   }
 });
 

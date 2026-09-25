@@ -18,7 +18,7 @@ import * as slots from '../shop/slots.js';
 import * as loyalty from '../shop/loyalty.js';
 import * as waCatalog from '../shop/wa-catalog.js';
 import { adminCommand } from './admin-commands.js';
-import { rewardsAfterPayment, notifyAdmin, notifyAdminProof, storeProof, changeOrderStatus } from './orders.js';
+import { rewardsAfterPayment, notifyAdmin, notifyAdminProof, storeProof, changeOrderStatus, PROOF_URL_PREFIX } from './orders.js';
 import { publish } from '../utils/events.js';
 
 export const STATES = Object.freeze({
@@ -183,6 +183,7 @@ function toInput(msg) {
     // Keywords and free-text matching only apply to typed text, never to button titles.
     norm: msg.type === 'text' ? normalize(msg.text) : '',
     mediaId: msg.mediaId || null,
+    mediaUrl: msg.mediaUrl || null, // Messenger and Instagram deliver media as a link
     location: msg.location || null,
     geo: msg.geo || null, // { zone, place } from reverse geocoding, see enrich.js
     nlu: msg.nlu?.items ? msg.nlu : null, // { items, unknown } understood by Claude, see enrich.js
@@ -748,7 +749,8 @@ function goPayment(s) {
   return go(s, STATES.PICK_PAYMENT);
 }
 
-const isProofMedia = (input) => Boolean(input.mediaId) && ['image', 'document'].includes(input.type);
+const proofRef = (input) => (input.mediaId || (input.mediaUrl ? `${PROOF_URL_PREFIX}${input.mediaUrl}` : ''));
+const isProofMedia = (input) => Boolean(proofRef(input)) && ['image', 'document'].includes(input.type);
 
 function recordProof(s, orderId, mediaId) {
   db.setPaymentProof(orderId, mediaId);
@@ -772,9 +774,9 @@ function attachLateProof(s, input) {
   const order = db.latestUnpaidOrderWithoutProof(s.customer.id);
   if (!order) return false;
   if (IDLE.has(s.state) || s.state === STATES.MENU) {
-    receiveProof(s, order.id, input.mediaId);
+    receiveProof(s, order.id, proofRef(input));
   } else {
-    recordProof(s, order.id, input.mediaId);
+    recordProof(s, order.id, proofRef(input));
     reprompt(s);
   }
   return true;
@@ -1461,7 +1463,7 @@ const HANDLERS = {
       );
     },
     handle(s, input) {
-      if (isProofMedia(input)) return receiveProof(s, s.ctx.orderId, input.mediaId);
+      if (isProofMedia(input)) return receiveProof(s, s.ctx.orderId, proofRef(input));
       // A menu button from an earlier message: let the customer move on. The order stays
       // awaiting payment and a screenshot sent later is still attached to it.
       if (input.replyId?.startsWith('menu:')) return idle.handle(s, input);

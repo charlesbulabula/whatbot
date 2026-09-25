@@ -89,3 +89,35 @@ test('the dashboard never shows a Messenger id as a phone number', async () => {
   assert.match(channelBadge('i:555'), /Instagram/);
   assert.match(waLink('m:42'), /m\.me\/42/);
 });
+
+test('a payment screenshot sent on Instagram is attached like any other', async () => {
+  const db = await import('../src/db/index.js');
+  const from = 'i:900002';
+  const say = (text) => handleInbound({ from, id: `p${Math.random()}`, type: 'text', text });
+  const tap = (replyId) => handleInbound({ from, id: `p${Math.random()}`, type: 'interactive', replyId, text: '' });
+
+  say('Bonjour');
+  tap('menu:order');
+  tap('p:1');
+  tap('size:medium');
+  tap('qty:1');
+  tap('more:checkout');
+  say('Cliente Insta');
+  tap('zone:1');
+  say('Av. Test');
+  const recap = tap('recap:confirm');
+  assert.ok(recap.messages.length, 'the order went through on Instagram');
+  const customer = db.getCustomer(from);
+  const orderId = db.openOrdersToday(customer.id)[0]?.id;
+  assert.ok(orderId, 'an order exists for this Instagram customer');
+
+  // Messenger hands media over as a link, not as an id.
+  const res = handleInbound({
+    from, id: 'img1', type: 'image',
+    mediaUrl: 'https://scontent.example/proof.jpg',
+  });
+  assert.match(res.messages.map((m) => m.body).join('\n'), /Capture reçue/);
+
+  const saved = db.getOrder(orderId);
+  assert.match(String(saved.payment_proof), /^url:https:\/\/scontent/, 'the link is kept, marked as a link');
+});
