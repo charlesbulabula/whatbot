@@ -2,7 +2,7 @@
 // orders, conversation, loyalty ledger, referrals and internal notes.
 import { money } from '../../i18n/index.js';
 import {
-  esc, linkify, card, section, empty, alert, badge, statusBadge, paymentBadge, waLink, table, pager,
+  esc, linkify, channelBadge, card, section, empty, alert, badge, statusBadge, paymentBadge, waLink, table, pager,
   layout, liveUpdates, icon, avatar, stat, tabs, filterChips, iconAction, iconPost,
   utcDateTime, dayOf,
 } from '../ui.js';
@@ -52,7 +52,7 @@ ${FLAGS.map((f) => option(f, L.flags[f], filters.flag)).join('')}</select></div>
     .map((c) => `<tr${c.blocked ? ' style="opacity:.6"' : ''}>
 <td><div class="actions">${avatar(c.name, c.phone, { size: '32px' })}
 <span class="stack"><a href="/admin/customers/${c.id}"><b>${esc(c.name || '—')}</b></a>
-<span class="muted" style="font-size:.75rem">${waLink(c.phone)}</span></span></div>
+<span class="muted" style="font-size:.75rem">${waLink(c.phone)} ${channelBadge(c.phone)}</span></span></div>
 ${parseTags(c.tags).map((t) => `<span class="tag">${esc(t)}</span>`).join(' ')}</td>
 <td>${esc(c.neighborhood || '')}</td>
 <td>${badge(L.segments[c.segment] || c.segment, c.segment === 'vip' ? 'primary' : c.segment === 'regular' ? 'info' : 'gray')}</td>
@@ -128,7 +128,7 @@ export function customerPage(L, locale, data) {
 ${avatar(customer.name, customer.phone, { size: '54px' })}
 <span class="stack" style="gap:.15rem">
   <b class="strong" style="font-size:1.125rem">${esc(customer.name || `+${customer.phone}`)}</b>
-  <span class="muted">${waLink(customer.phone)} · ${esc(customer.neighborhood || '—')}</span>
+  <span class="muted">${waLink(customer.phone)} ${channelBadge(customer.phone)} · ${esc(customer.neighborhood || '—')}</span>
   <span class="inline-list" style="margin-top:.35rem">
     ${badge(L.segments[customer.segment] || customer.segment, customer.segment === 'vip' ? 'primary' : customer.segment === 'regular' ? 'info' : 'gray')}
     ${customer.blocked ? badge(L.flags.blocked, 'danger') : ''}

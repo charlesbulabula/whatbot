@@ -7,6 +7,7 @@ import * as settings from '../shop/settings.js';
 import { CSS, FONT_LINK, FAVICON, icon } from './theme.js';
 import { vapid } from '../pwa.js';
 import { can as roleCan } from '../shop/staff.js';
+import { channelOf, idOf, CHANNEL_LABEL, WHATSAPP, INSTAGRAM } from '../channels.js';
 
 export const esc = (v) =>
   String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -34,8 +35,28 @@ export const statusBadge = (L, status) => badge(L.status[status] || status, STAT
 export const paymentBadge = (L, order) =>
   order.payment_method === 'cash' ? badge(L.payCash, 'warning') : badge(L.payMomo, 'gray');
 
-export const waLink = (phone) =>
-  `<a href="https://wa.me/${esc(phone)}" target="_blank" rel="noopener">+${esc(phone)}</a>`;
+/**
+ * How to reach this customer, whichever door they came through. A Messenger or
+ * Instagram address is not a phone number and must never be shown as one --
+ * "+i:555" would be a small lie the shop would act on.
+ */
+export const waLink = (address) => {
+  const channel = channelOf(address);
+  if (channel === WHATSAPP) {
+    return `<a href="https://wa.me/${esc(address)}" target="_blank" rel="noopener">+${esc(address)}</a>`;
+  }
+  const label = CHANNEL_LABEL[channel];
+  const href = channel === INSTAGRAM
+    ? `https://ig.me/m/${esc(idOf(address))}`
+    : `https://m.me/${esc(idOf(address))}`;
+  return `<a href="${href}" target="_blank" rel="noopener">${esc(label)}</a>`;
+};
+
+/** A small mark saying where a conversation happens, shown only off WhatsApp. */
+export const channelBadge = (address) => {
+  const channel = channelOf(address);
+  return channel === WHATSAPP ? '' : badge(CHANNEL_LABEL[channel], channel === INSTAGRAM ? 'danger' : 'info');
+};
 
 export const initials = (name, phone) => {
   const source = String(name || '').trim();

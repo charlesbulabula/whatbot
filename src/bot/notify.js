@@ -1,7 +1,10 @@
 import { config } from '../config.js';
 import { logger } from '../utils/logger.js';
 import { normalizeLocale } from '../i18n/index.js';
-import { send, WhatsAppError } from '../whatsapp/client.js';
+import { WhatsAppError } from '../whatsapp/client.js';
+import { MessengerError } from '../meta/messenger.js';
+import { send } from '../send.js';
+import { isWhatsApp } from '../channels.js';
 import { template } from './messages.js';
 
 // Meta allows free-form messages for 24h after the customer's last message.
@@ -26,7 +29,20 @@ export async function notify(customer, { message, templateKey, templateParams = 
       await send(message);
       return 'sent';
     } catch (err) {
-      if (!(err instanceof WhatsAppError && err.outsideWindow)) throw err;
+      const closed = (err instanceof WhatsAppError || err instanceof MessengerError) && err.outsideWindow;
+      if (!closed) throw err;
+    }
+  }
+  // Off WhatsApp there are no approved templates, but Meta's human agent tag
+  // allows an answer for 7 days. It is meant for a person answering, so it is
+  // used only here, where the shop is deliberately reaching out.
+  if (!isWhatsApp(customer.phone)) {
+    try {
+      await send(message, { humanAgent: true });
+      return 'sent';
+    } catch (err) {
+      logger.info(`Window closed on ${customer.phone}: ${err.message}`);
+      return 'skipped';
     }
   }
   const name = templateKey && config.whatsapp.templates[templateKey];

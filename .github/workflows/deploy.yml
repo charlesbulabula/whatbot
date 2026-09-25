@@ -80,6 +80,9 @@ jobs:
           WHATBOT_WA_PHONE_NUMBER_ID: ${{ secrets.WA_PHONE_NUMBER_ID }}
           WHATBOT_WA_TOKEN: ${{ secrets.WA_TOKEN }}
           WHATBOT_WA_APP_SECRET: ${{ secrets.WA_APP_SECRET }}
+          WHATBOT_META_PAGE_ID: ${{ secrets.META_PAGE_ID }}
+          WHATBOT_META_PAGE_TOKEN: ${{ secrets.META_PAGE_TOKEN }}
+          WHATBOT_META_INSTAGRAM_ID: ${{ secrets.META_INSTAGRAM_ID }}
           WHATBOT_WA_BUSINESS_NUMBER: ${{ secrets.WA_BUSINESS_NUMBER }}
           WHATBOT_MOMO_ORANGE: ${{ secrets.MOMO_ORANGE }}
           WHATBOT_MOMO_AIRTEL: ${{ secrets.MOMO_AIRTEL }}

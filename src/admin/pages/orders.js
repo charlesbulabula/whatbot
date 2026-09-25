@@ -2,7 +2,7 @@
 // documents (invoice with a verifiable QR code, prep ticket, picking list).
 import { money } from '../../i18n/index.js';
 import {
-  esc, linkify, card, section, empty, badge, statusBadge, paymentBadge, waLink, table, pager,
+  esc, linkify, channelBadge, card, section, empty, badge, statusBadge, paymentBadge, waLink, table, pager,
   layout, liveUpdates, icon, productLabel, variantName, extrasName, utcTime, utcDateTime, dayOf,
   iconAction, filterChips, avatar,
 } from '../ui.js';
@@ -57,7 +57,7 @@ ${option('momo', L.payMomo, filters.payment)}${option('cash', L.payCash, filters
 <span class="muted" style="font-size:.75rem">${esc(utcDateTime(o.created_at, locale))}</span></td>
 <td><div class="actions">${avatar(o.customer_name, o.customer.phone, { size: '30px' })}
 <span class="stack"><a href="/admin/customers/${o.customer.id}">${esc(o.customer_name || '—')}</a>
-<span class="muted" style="font-size:.75rem">${waLink(o.customer.phone)}</span></span></div></td>
+<span class="muted" style="font-size:.75rem">${waLink(o.customer.phone)} ${channelBadge(o.customer.phone)}</span></span></div></td>
 <td>${esc(o.neighborhood || '')}</td>
 <td>${statusBadge(L, o.status)}</td>
 <td>${paymentBadge(L, o)}</td>

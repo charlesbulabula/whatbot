@@ -4,6 +4,7 @@ import { config, assertConfig } from './config.js';
 import * as settings from './shop/settings.js';
 import { logger } from './utils/logger.js';
 import { notFoundHandler, errorHandler } from './errors.js';
+import { metaWebhookRouter } from './meta/webhook.js';
 import { seedIfEmpty } from './db/seed.js';
 import { db, ping, seedZonesIfEmpty, seedVariantsIfMissing } from './db/index.js';
 import { webhookRouter } from './whatsapp/webhook.js';
@@ -62,6 +63,7 @@ app.get('/healthz', (_req, res) => {
   }
 });
 app.use(webhookRouter);
+app.use(metaWebhookRouter); // /meta/webhook — Messenger and Instagram
 app.use('/admin', adminRouter);
 app.use('/route', routeRouter);
 app.use('/v', verifyRouter);

@@ -44,6 +44,17 @@ export const config = {
     },
   },
 
+  // Messenger and Instagram Direct: the same bot, on the shop's Facebook Page.
+  // Empty page id or token = the channel is off and nothing is served.
+  meta: {
+    pageId: process.env.META_PAGE_ID || '',
+    pageToken: process.env.META_PAGE_TOKEN || '',
+    // The Instagram professional account linked to that Page, for its own webhooks.
+    instagramId: process.env.META_INSTAGRAM_ID || '',
+    // Meta signs Page webhooks with the app secret, exactly as it does WhatsApp's.
+    verifyToken: process.env.META_VERIFY_TOKEN || process.env.WA_VERIFY_TOKEN || '',
+  },
+
   shop: {
     name: process.env.SHOP_NAME || 'Epices Fraiches',
     currency: process.env.CURRENCY || 'FC',
